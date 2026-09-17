@@ -10,9 +10,12 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Local image folders
+# Ignore image files inside input/output
 input/*
+!input/.gitkeep
+
 output/*
+!output/.gitkeep
 
 # macOS files
 .DS_Store
@@ -20,3 +23,6 @@ output/*
 # IDE/editor files
 .vscode/
 .idea/
+
+# Build/package files
+*.egg-info/
