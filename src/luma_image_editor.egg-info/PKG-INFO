@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: luma-image-editor
-Version: 0.1.0
-Summary: A command-line batch image editor with professional presets
-Requires-Python: >=3.12
-License-File: LICENSE
-Requires-Dist: Pillow
-Requires-Dist: numpy
-Dynamic: license-file
