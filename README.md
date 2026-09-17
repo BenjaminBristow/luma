@@ -1,5 +1,6 @@
 # Photo-Editor
-I place to automatically edit all your photos for you 
+A place to automatically edit all your photos for you 
+
 # Luma
 
 Luma is a command-line batch image editor built with Python.
