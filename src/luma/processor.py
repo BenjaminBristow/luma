@@ -3,6 +3,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from tqdm import tqdm
+
 from luma.operations.contrast import apply_contrast
 from luma.operations.saturation import apply_saturation
 from luma.operations.colour_grading import apply_colour_grading
@@ -190,39 +192,42 @@ def process_directory(
     successful = 0
     failed = 0
 
-    for index, input_path in enumerate(image_files, start=1):
-        progress = int((index / len(image_files)) * 100)
+    with tqdm(
+        image_files,
+        desc="Processing images",
+        unit="image",
+    ) as progress_bar:
 
-        # Calculate the image's location relative to the input directory.
-        # This allows us to recreate the same folder structure in output.
-        relative_path = input_path.relative_to(input_directory)
+        for input_path in progress_bar:
+            relative_path = input_path.relative_to(input_directory)
 
-        output_path = output_directory / relative_path
+            output_path = output_directory / relative_path
 
-        # Some images may be several folders deep, so create their
-        # parent directory before attempting to save the image.
-        output_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        print(
-            f"Processing: {relative_path} "
-            f"[{progress}%]"
-        )
-
-        try:
-            process_image(
-                input_path,
-                output_path,
-                settings,
+            # Nested folders need to be created before the image
+            # can be saved into the matching output location.
+            output_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
             )
 
-            successful += 1
+            progress_bar.set_postfix(
+                file=str(relative_path),
+            )
 
-        except Exception as error:
-            failed += 1
-            print(f"  Failed: {error}")
+            try:
+                process_image(
+                    input_path,
+                    output_path,
+                    settings,
+                )
+
+                successful += 1
+
+            except Exception as error:
+                failed += 1
+                tqdm.write(
+                    f"Failed: {relative_path}: {error}"
+                )
 
     elapsed_time = time.perf_counter() - start_time
 
