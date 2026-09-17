@@ -154,12 +154,25 @@ def process_directory(
     }
 
     # Find supported image files directly inside the input directory.
-    image_files = [
-        path
-        for path in input_directory.iterdir()
-        if path.is_file()
-        and path.suffix.lower() in supported_extensions
-    ]
+    image_files = []
+
+    try:
+        for path in input_directory.iterdir():
+            try:
+                # Check each entry independently so one inaccessible or broken
+                # filesystem entry does not prevent the rest from being processed.
+                if (
+                    path.is_file()
+                    and path.suffix.lower() in supported_extensions
+                ):
+                    image_files.append(path)
+
+            except (PermissionError, FileNotFoundError, OSError) as error:
+                print(f"Skipping '{path}': {error}")
+
+    except (PermissionError, FileNotFoundError, OSError) as error:
+        print(f"Unable to access input directory: {error}")
+        return
 
     # Tell the user when there is nothing to process.
     if not image_files:
