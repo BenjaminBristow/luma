@@ -1,0 +1,22 @@
+# Virtual environment
+.venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Test and coverage files
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local image folders
+input/*
+output/*
+
+# macOS files
+.DS_Store
+
+# IDE/editor files
+.vscode/
+.idea/
