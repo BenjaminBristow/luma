@@ -89,7 +89,10 @@ def test_process_image_changes_image(tmp_path):
     with Image.open(output_path) as processed:
         processed_array = np.array(processed)
 
-    assert not np.array_equal(original_array, processed_array)
+    assert not np.array_equal(
+        original_array,
+        processed_array,
+    )
 
 
 def test_process_directory_processes_multiple_images(tmp_path):
@@ -131,14 +134,10 @@ def test_process_directory_ignores_unsupported_files(tmp_path):
         "This should not be processed."
     )
 
-    settings = {
-        "contrast": 20,
-    }
-
     process_directory(
         input_directory,
         output_directory,
-        settings,
+        {},
     )
 
     assert (output_directory / "image.png").exists()
@@ -206,22 +205,87 @@ def test_process_directory_continues_after_invalid_image(tmp_path):
     assert not (output_directory / "broken.png").exists()
 
 
-def test_process_directory_handles_permission_error(tmp_path, monkeypatch, capsys):
+def test_process_directory_processes_nested_images(tmp_path):
+    """Images inside nested folders should also be processed."""
+    input_directory = tmp_path / "input"
+    output_directory = tmp_path / "output"
+
+    holiday_directory = input_directory / "holiday"
+    family_directory = input_directory / "family"
+
+    holiday_directory.mkdir(parents=True)
+    family_directory.mkdir(parents=True)
+
+    create_test_image(holiday_directory / "beach.png")
+    create_test_image(family_directory / "dinner.png")
+    create_test_image(input_directory / "random.png")
+
+    process_directory(
+        input_directory,
+        output_directory,
+        {},
+    )
+
+    assert (output_directory / "random.png").exists()
+    assert (output_directory / "holiday" / "beach.png").exists()
+    assert (output_directory / "family" / "dinner.png").exists()
+
+
+def test_process_directory_preserves_nested_structure(tmp_path):
+    """Nested input folders should be recreated in the output directory."""
+    input_directory = tmp_path / "input"
+    output_directory = tmp_path / "output"
+
+    nested_directory = (
+        input_directory
+        / "holiday"
+        / "2026"
+        / "st_lucia"
+    )
+
+    nested_directory.mkdir(parents=True)
+
+    create_test_image(
+        nested_directory / "sunset.png"
+    )
+
+    process_directory(
+        input_directory,
+        output_directory,
+        {},
+    )
+
+    expected_output = (
+        output_directory
+        / "holiday"
+        / "2026"
+        / "st_lucia"
+        / "sunset.png"
+    )
+
+    assert expected_output.exists()
+
+
+def test_process_directory_handles_permission_error(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
     """
-    A PermissionError while scanning the input directory should not
-    crash the application.
+    A PermissionError while recursively scanning the input directory
+    should not crash the application.
     """
     input_directory = tmp_path / "input"
     output_directory = tmp_path / "output"
 
     input_directory.mkdir()
 
-    def raise_permission_error(self):
+    def raise_permission_error(self, pattern):
         raise PermissionError("Permission denied")
 
     monkeypatch.setattr(
         Path,
-        "iterdir",
+        "rglob",
         raise_permission_error,
     )
 
@@ -243,20 +307,20 @@ def test_process_directory_handles_file_not_found_error(
     capsys,
 ):
     """
-    A FileNotFoundError while scanning the input directory should be
-    handled without crashing.
+    A FileNotFoundError while recursively scanning the input directory
+    should be handled without crashing.
     """
     input_directory = tmp_path / "input"
     output_directory = tmp_path / "output"
 
     input_directory.mkdir()
 
-    def raise_file_not_found_error(self):
+    def raise_file_not_found_error(self, pattern):
         raise FileNotFoundError("Directory disappeared")
 
     monkeypatch.setattr(
         Path,
-        "iterdir",
+        "rglob",
         raise_file_not_found_error,
     )
 
@@ -278,20 +342,20 @@ def test_process_directory_handles_os_error(
     capsys,
 ):
     """
-    A general filesystem OSError while scanning should be handled
-    without crashing.
+    A general filesystem OSError while recursively scanning should
+    be handled without crashing.
     """
     input_directory = tmp_path / "input"
     output_directory = tmp_path / "output"
 
     input_directory.mkdir()
 
-    def raise_os_error(self):
+    def raise_os_error(self, pattern):
         raise OSError("Filesystem error")
 
     monkeypatch.setattr(
         Path,
-        "iterdir",
+        "rglob",
         raise_os_error,
     )
 
@@ -313,8 +377,8 @@ def test_process_directory_skips_problematic_entry(
     capsys,
 ):
     """
-    A filesystem error affecting one entry should not prevent other
-    entries from being discovered.
+    A filesystem error affecting one discovered entry should not
+    prevent other entries from being processed.
     """
     input_directory = tmp_path / "input"
     output_directory = tmp_path / "output"
@@ -335,21 +399,19 @@ def test_process_directory_skips_problematic_entry(
         def __str__(self):
             return str(problematic_entry)
 
-    original_iterdir = Path.iterdir
-
-    def custom_iterdir(self):
+    def custom_rglob(self, pattern):
         if self == input_directory:
             return iter([
                 valid_image,
                 ProblematicPath(),
             ])
 
-        return original_iterdir(self)
+        return iter(())
 
     monkeypatch.setattr(
         Path,
-        "iterdir",
-        custom_iterdir,
+        "rglob",
+        custom_rglob,
     )
 
     process_directory(

@@ -133,7 +133,15 @@ def process_directory(
     settings: dict,
 ) -> None:
     """
-    Process every supported image in an input directory.
+    Recursively process supported images in an input directory.
+
+    The relative folder structure inside the input directory is
+    preserved inside the output directory.
+
+    For example:
+
+        input/holiday/beach.jpg
+        -> output/holiday/beach.jpg
 
     Each image is processed independently. If one image fails,
     the remaining images continue processing.
@@ -153,14 +161,13 @@ def process_directory(
         ".webp",
     }
 
-    # Find supported image files directly inside the input directory.
     image_files = []
 
     try:
-        for path in input_directory.iterdir():
+        # rglob("*") recursively searches through the entire directory
+        # tree instead of only looking at files immediately inside it.
+        for path in input_directory.rglob("*"):
             try:
-                # Check each entry independently so one inaccessible or broken
-                # filesystem entry does not prevent the rest from being processed.
                 if (
                     path.is_file()
                     and path.suffix.lower() in supported_extensions
@@ -174,27 +181,33 @@ def process_directory(
         print(f"Unable to access input directory: {error}")
         return
 
-    # Tell the user when there is nothing to process.
     if not image_files:
         print("No supported images found in the input directory.")
         return
 
-    # Start timing the batch once we know there are images to process.
     start_time = time.perf_counter()
 
     successful = 0
     failed = 0
 
-    # Process each image independently.
     for index, input_path in enumerate(image_files, start=1):
-
-        # Calculate the percentage of the batch that has been completed.
         progress = int((index / len(image_files)) * 100)
 
-        output_path = output_directory / input_path.name
+        # Calculate the image's location relative to the input directory.
+        # This allows us to recreate the same folder structure in output.
+        relative_path = input_path.relative_to(input_directory)
+
+        output_path = output_directory / relative_path
+
+        # Some images may be several folders deep, so create their
+        # parent directory before attempting to save the image.
+        output_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
         print(
-            f"Processing: {input_path.name} "
+            f"Processing: {relative_path} "
             f"[{progress}%]"
         )
 
@@ -208,13 +221,9 @@ def process_directory(
             successful += 1
 
         except Exception as error:
-            # A single problematic image should not stop the
-            # rest of the batch from processing.
             failed += 1
-
             print(f"  Failed: {error}")
 
-    # Calculate the total processing time.
     elapsed_time = time.perf_counter() - start_time
 
     print()

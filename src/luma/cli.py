@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+from importlib.metadata import version
 
 from luma.presets import PRESETS
 from luma.processor import process_directory
@@ -17,6 +18,13 @@ def main():
     # Create the command-line argument parser.
     parser = argparse.ArgumentParser(
         description="Luma - command-line image editor"
+    )
+
+    # Allow the user to see the version.
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"Luma {version('luma-image-editor')}",
     )
 
     # Allow the user to list all available presets.
