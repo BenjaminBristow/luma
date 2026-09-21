@@ -5,8 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "luma"
 version = "2.0.0"
-description = "A batch image editor with professional presets"
+description = "A Python batch photo editor with a modern GUI and command-line interface"
+readme = "README.md"
 requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Benjamin Bristow"}
+]
 dependencies = [
     "Pillow",
     "numpy",
@@ -14,6 +19,11 @@ dependencies = [
     "customtkinter",
     "tkinterdnd2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/BenjaminBristow/luma"
+Repository = "https://github.com/BenjaminBristow/luma"
+Issues = "https://github.com/BenjaminBristow/luma/issues"
 
 [project.scripts]
 luma = "luma.gui:main"
