@@ -12,6 +12,8 @@ dependencies = [
     "numpy",
     "pytest",
     "tqdm",
+    "customtkinter",
+    "tkinterdnd2",
 ]
 
 [project.scripts]
