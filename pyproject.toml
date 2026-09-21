@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "luma"
+name = "luma-image-editor"
 version = "2.0.0"
 description = "A Python batch photo editor with a modern GUI and command-line interface"
 readme = "README.md"
