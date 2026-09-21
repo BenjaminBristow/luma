@@ -3,21 +3,21 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "luma-image-editor"
+name = "luma"
 version = "2.0.0"
-description = "A command-line batch image editor with professional presets"
+description = "A batch image editor with professional presets"
 requires-python = ">=3.12"
 dependencies = [
     "Pillow",
     "numpy",
-    "pytest",
     "tqdm",
     "customtkinter",
     "tkinterdnd2",
 ]
 
 [project.scripts]
-luma = "luma.cli:main"
+luma = "luma.gui:main"
+luma-cli = "luma.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
