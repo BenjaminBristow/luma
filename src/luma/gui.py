@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
-from PIL import Image, ImageTk
+from PIL import Image, ImageOps, ImageTk
 
 try:
     from tkinterdnd2 import TkinterDnD, DND_FILES
@@ -1414,6 +1414,12 @@ class LumaApp:
         try:
             image = Image.open(
                 self.example_image_path
+            )
+
+            # Apply the camera's EXIF orientation so portrait
+            # photographs are displayed the correct way up.
+            image = ImageOps.exif_transpose(
+                image
             ).convert("RGB")
 
             self._set_preview_image(

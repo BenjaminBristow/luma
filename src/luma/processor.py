@@ -1,7 +1,7 @@
 import time
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from tqdm import tqdm
 
@@ -40,9 +40,9 @@ def process_image(
     # Open the source image. The context manager automatically closes
     # the image file once processing has finished.
     with Image.open(input_path) as image:
-
-        # Start with the original image.
-        edited_image = image
+    # Apply the camera's EXIF orientation so portrait photos
+    # are physically rotated correctly before editing.
+        edited_image = ImageOps.exif_transpose(image)
 
         # Basic tonal and colour adjustments.
         edited_image = apply_contrast(
