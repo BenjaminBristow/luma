@@ -34,6 +34,7 @@ output/*
 
 # macOS files
 .DS_Store
+*.dmg
 
 # IDE/editor files
 .vscode/
