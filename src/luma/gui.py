@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-import threading
+import json
+import os
+import subprocess
+import sys
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
+
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
-from PIL import Image, ImageOps, ImageTk
+from PIL import Image, ImageTk
 
 try:
     from tkinterdnd2 import TkinterDnD, DND_FILES
@@ -25,8 +30,93 @@ from luma.processor import process_image
 # Appearance
 # ---------------------------------------------------------------------------
 
-ctk.set_appearance_mode("Light")
-ctk.set_default_color_theme("blue")
+BG = "#F4F5F7"
+CARD = "#FFFFFF"
+CARD_BORDER = "#E7E9ED"
+
+TEXT = "#17191C"
+SECONDARY_TEXT = "#73777F"
+MUTED_TEXT = "#A0A4AA"
+
+ACCENT = "#4F7CFF"
+ACCENT_HOVER = "#3F6CEB"
+
+SUCCESS = "#2E9B63"
+ERROR = "#D94A4A"
+
+RADIUS = 18
+
+SUPPORTED_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+}
+
+
+# ---------------------------------------------------------------------------
+# Platform helpers
+# ---------------------------------------------------------------------------
+
+def get_pictures_folder() -> Path:
+    """
+    Return the user's normal Pictures folder.
+
+    macOS and Linux normally use ~/Pictures.
+
+    Windows normally uses the Pictures folder inside the user's
+    user profile.
+    """
+
+    home = Path.home()
+
+    if sys.platform == "win32":
+        pictures = Path(
+            os.environ.get(
+                "USERPROFILE",
+                str(home),
+            )
+        ) / "Pictures"
+
+    else:
+        pictures = home / "Pictures"
+
+    # If the Pictures folder does not exist, use the home folder
+    # as a safe fallback.
+    if not pictures.exists():
+        pictures = home
+
+    return pictures
+
+
+def get_settings_folder() -> Path:
+    """
+    Return a suitable folder for Luma's small settings file.
+
+    The exact location differs between operating systems, so we
+    keep this logic separate from the rest of the GUI.
+    """
+
+    home = Path.home()
+
+    if sys.platform == "win32":
+        app_data = os.environ.get("APPDATA")
+
+        if app_data:
+            return Path(app_data) / "Luma"
+
+        return home / "AppData" / "Roaming" / "Luma"
+
+    if sys.platform == "darwin":
+        return (
+            home
+            / "Library"
+            / "Application Support"
+            / "Luma"
+        )
+
+    # Linux and other Unix-like systems.
+    return home / ".config" / "luma"
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +124,7 @@ ctk.set_default_color_theme("blue")
 # ---------------------------------------------------------------------------
 
 def get_preset_categories() -> list[str]:
-    """Return all preset categories in alphabetical order."""
+    """Return all available preset categories."""
 
     return sorted(
         {
@@ -44,8 +134,10 @@ def get_preset_categories() -> list[str]:
     )
 
 
-def get_presets_for_category(category: str) -> list[str]:
-    """Return the preset names belonging to a specific category."""
+def get_presets_for_category(
+    category: str,
+) -> list[str]:
+    """Return preset names belonging to a category."""
 
     return [
         preset.name
@@ -55,7 +147,7 @@ def get_presets_for_category(category: str) -> list[str]:
 
 
 def get_preset_by_name(name: str):
-    """Return the registered preset class matching the supplied name."""
+    """Find a preset by its name."""
 
     for preset in PRESETS.values():
         if preset.name == name:
@@ -65,15 +157,14 @@ def get_preset_by_name(name: str):
 
 
 def display_name(name: str) -> str:
-    """
-    Convert an internal preset name into a nicer name for the GUI.
+    """Turn an internal name into readable UI text."""
 
-    Example:
-        old-fashioned -> Old Fashioned
-        golden-hour   -> Golden Hour
-    """
-
-    return name.replace("-", " ").replace("_", " ").title()
+    return (
+        name
+        .replace("-", " ")
+        .replace("_", " ")
+        .title()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -81,134 +172,223 @@ def display_name(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 class LumaApp:
-    """Main Luma desktop application."""
+    """Main Luma graphical application."""
 
-    BG = "#F4F5F7"
-    CARD = "#FFFFFF"
-    CARD_BORDER = "#E7E9ED"
-
-    TEXT = "#17191C"
-    SECONDARY_TEXT = "#73777F"
-    MUTED_TEXT = "#A0A4AA"
-
-    ACCENT = "#4F7CFF"
-    ACCENT_HOVER = "#3F6CEB"
-
-    SUCCESS = "#2E9B63"
-    ERROR = "#D94A4A"
-
-    RADIUS = 18
-
-    def __init__(self):
-        # TkinterDnD.Tk gives the application native drag-and-drop support.
-        # CustomTkinter widgets can still be placed inside this root window.
-        if DND_AVAILABLE:
-            self.root = TkinterDnD.Tk()
-        else:
-            self.root = tk.Tk()
+    def __init__(self, root):
+        self.root = root
 
         self.root.title("Luma")
         self.root.geometry("1180x820")
         self.root.minsize(1000, 720)
-        self.root.configure(bg=self.BG)
 
-        # ------------------------------------------------------------------
+        # -------------------------------------------------------------------
+        # Luma folders
+        # -------------------------------------------------------------------
+
+        self.luma_root = get_pictures_folder() / "Luma"
+
+        self.default_input_folder = (
+            self.luma_root / "Luma_Input"
+        )
+
+        self.output_folder = (
+            self.luma_root / "Luma_Output"
+        )
+
+        # These folders are created automatically the first time
+        # Luma is opened.
+        self.default_input_folder.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        self.output_folder.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        # The active input folder can be changed by the user.
+        self.input_folder = (
+            self._load_saved_input_folder()
+        )
+
+        # If a previously selected folder no longer exists,
+        # fall back to Luma_Input.
+        if not self.input_folder.exists():
+            self.input_folder = (
+                self.default_input_folder
+            )
+
+        self.input_folder.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        # -------------------------------------------------------------------
         # Application state
-        # ------------------------------------------------------------------
+        # -------------------------------------------------------------------
 
         self.photo_paths: list[Path] = []
 
-        # The first image added becomes the example image shown in the
-        # BEFORE/AFTER preview area.
         self.example_image_path: Path | None = None
 
         self.preview_photo_before = None
         self.preview_photo_after = None
 
+        # Each preview receives a token. This prevents an older
+        # background preview from replacing a newer one.
         self.current_preview_token = 0
 
         self.processing = False
+
         self.last_output_folder: Path | None = None
 
-        self.default_output_root = (
-            Path.home() / "Pictures" / "Luma"
-        )
-
-        # ------------------------------------------------------------------
+        # -------------------------------------------------------------------
         # Build interface
-        # ------------------------------------------------------------------
+        # -------------------------------------------------------------------
 
+        self._configure_appearance()
         self._build_interface()
 
         if DND_AVAILABLE:
             self._setup_drag_and_drop()
 
-        self._update_photo_count()
+        # Automatically load photos from the current input folder.
+        self.load_input_folder()
 
-    # ----------------------------------------------------------------------
-    # Interface construction
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Appearance
+    # -----------------------------------------------------------------------
+
+    def _configure_appearance(self):
+        """Configure CustomTkinter's appearance."""
+
+        ctk.set_appearance_mode("light")
+        ctk.set_default_color_theme("blue")
+
+        self.root.configure(
+            background=BG,
+        )
+
+    # -----------------------------------------------------------------------
+    # Interface
+    # -----------------------------------------------------------------------
 
     def _build_interface(self):
-        """Create the complete Luma interface."""
+        """Build the complete Luma interface."""
 
-        self.main = ctk.CTkFrame(
+        self.root.grid_rowconfigure(
+            1,
+            weight=1,
+        )
+
+        self.root.grid_columnconfigure(
+            0,
+            weight=1,
+        )
+
+        main = ctk.CTkFrame(
             self.root,
-            fg_color=self.BG,
+            fg_color=BG,
             corner_radius=0,
         )
-        self.main.pack(fill="both", expand=True)
 
-        self.main.grid_columnconfigure(0, weight=1)
-        self.main.grid_rowconfigure(2, weight=1)
+        main.grid(
+            row=0,
+            column=0,
+            rowspan=2,
+            sticky="nsew",
+            padx=28,
+            pady=24,
+        )
 
-        self._build_header()
-        self._build_controls()
-        self._build_preview()
-        self._build_bottom_bar()
+        main.grid_rowconfigure(
+            2,
+            weight=1,
+        )
 
-    # ----------------------------------------------------------------------
-    # Header
-    # ----------------------------------------------------------------------
+        main.grid_columnconfigure(
+            0,
+            weight=1,
+        )
 
-    def _build_header(self):
-        """Build the Luma title and application subtitle."""
+        self._build_header(main)
 
-        header = ctk.CTkFrame(
-            self.main,
+        controls = ctk.CTkFrame(
+            main,
             fg_color="transparent",
         )
+
+        controls.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            pady=(24, 18),
+        )
+
+        controls.grid_columnconfigure(
+            0,
+            weight=1,
+        )
+
+        controls.grid_columnconfigure(
+            1,
+            weight=1,
+        )
+
+        self._build_import_card(controls)
+        self._build_preset_card(controls)
+
+        self._build_preview_section(main)
+
+        self._build_bottom_bar(main)
+
+    def _build_header(self, parent):
+        """Build the application header."""
+
+        header = ctk.CTkFrame(
+            parent,
+            fg_color="transparent",
+        )
+
         header.grid(
             row=0,
             column=0,
             sticky="ew",
-            padx=48,
-            pady=(32, 8),
         )
 
-        header.grid_columnconfigure(0, weight=1)
+        header.grid_columnconfigure(
+            0,
+            weight=1,
+        )
 
         title = ctk.CTkLabel(
             header,
             text="Luma",
             font=ctk.CTkFont(
                 family="Arial",
-                size=32,
+                size=30,
                 weight="bold",
             ),
-            text_color=self.TEXT,
+            text_color=TEXT,
         )
-        title.grid(row=0, column=0, sticky="w")
+
+        title.grid(
+            row=0,
+            column=0,
+            sticky="w",
+        )
 
         subtitle = ctk.CTkLabel(
             header,
-            text="Make your photos look the way you imagined.",
+            text="Simple photo editing without the complicated bits.",
             font=ctk.CTkFont(
                 family="Arial",
-                size=14,
+                size=13,
             ),
-            text_color=self.SECONDARY_TEXT,
+            text_color=SECONDARY_TEXT,
         )
+
         subtitle.grid(
             row=1,
             column=0,
@@ -216,65 +396,42 @@ class LumaApp:
             pady=(2, 0),
         )
 
-        clear_button = ctk.CTkButton(
+        self.clear_button = ctk.CTkButton(
             header,
             text="Clear photos",
-            width=110,
+            width=115,
             height=36,
             corner_radius=10,
-            fg_color="#FFFFFF",
-            hover_color="#ECEEF1",
-            text_color=self.SECONDARY_TEXT,
+            fg_color="#F1F2F4",
+            hover_color="#E6E8EC",
+            text_color=TEXT,
             border_width=1,
-            border_color=self.CARD_BORDER,
+            border_color=CARD_BORDER,
             command=self.clear_photos,
         )
-        clear_button.grid(
+
+        self.clear_button.grid(
             row=0,
             column=1,
             rowspan=2,
             sticky="e",
         )
 
-    # ----------------------------------------------------------------------
-    # Controls
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Import card
+    # -----------------------------------------------------------------------
 
-    def _build_controls(self):
-        """Build the photo drop area and preset controls."""
-
-        controls = ctk.CTkFrame(
-            self.main,
-            fg_color="transparent",
-        )
-        controls.grid(
-            row=1,
-            column=0,
-            sticky="ew",
-            padx=48,
-            pady=(12, 12),
-        )
-
-        controls.grid_columnconfigure(0, weight=1)
-        controls.grid_columnconfigure(1, weight=1)
-
-        self._build_drop_card(controls)
-        self._build_preset_card(controls)
-
-    # ----------------------------------------------------------------------
-    # Drop area
-    # ----------------------------------------------------------------------
-
-    def _build_drop_card(self, parent):
-        """Build the photo import card."""
+    def _build_import_card(self, parent):
+        """Build the input-folder and photo import card."""
 
         card = ctk.CTkFrame(
             parent,
-            fg_color=self.CARD,
-            corner_radius=self.RADIUS,
+            fg_color=CARD,
+            corner_radius=RADIUS,
             border_width=1,
-            border_color=self.CARD_BORDER,
+            border_color=CARD_BORDER,
         )
+
         card.grid(
             row=0,
             column=0,
@@ -282,7 +439,10 @@ class LumaApp:
             padx=(0, 8),
         )
 
-        card.grid_columnconfigure(0, weight=1)
+        card.grid_columnconfigure(
+            0,
+            weight=1,
+        )
 
         icon = ctk.CTkLabel(
             card,
@@ -292,73 +452,138 @@ class LumaApp:
                 size=34,
                 weight="bold",
             ),
-            text_color=self.ACCENT,
+            text_color=ACCENT,
         )
+
         icon.grid(
             row=0,
             column=0,
-            pady=(20, 2),
+            pady=(18, 0),
         )
 
         title = ctk.CTkLabel(
             card,
-            text="Drop your photos here",
+            text="Import Photos",
             font=ctk.CTkFont(
                 family="Arial",
                 size=17,
                 weight="bold",
             ),
-            text_color=self.TEXT,
+            text_color=TEXT,
         )
-        title.grid(row=1, column=0)
 
-        subtitle = ctk.CTkLabel(
+        title.grid(
+            row=1,
+            column=0,
+        )
+
+        current_label = ctk.CTkLabel(
             card,
-            text="or choose photos from your Mac",
+            text="Current folder:",
             font=ctk.CTkFont(
                 family="Arial",
                 size=12,
             ),
-            text_color=self.SECONDARY_TEXT,
-        )
-        subtitle.grid(
-            row=2,
-            column=0,
-            pady=(2, 12),
+            text_color=SECONDARY_TEXT,
         )
 
-        choose_button = ctk.CTkButton(
+        current_label.grid(
+            row=2,
+            column=0,
+            pady=(10, 2),
+        )
+
+        # This displays only the folder name to keep the interface
+        # simple. The full path is available in the tooltip-like
+        # secondary label underneath.
+        self.input_folder_name_label = ctk.CTkLabel(
             card,
-            text="Choose Photos",
+            text=self.input_folder.name,
+            font=ctk.CTkFont(
+                family="Arial",
+                size=16,
+                weight="bold",
+            ),
+            text_color=TEXT,
+        )
+
+        self.input_folder_name_label.grid(
+            row=3,
+            column=0,
+        )
+
+        self.input_folder_path_label = ctk.CTkLabel(
+            card,
+            text=self._shorten_path(
+                self.input_folder
+            ),
+            font=ctk.CTkFont(
+                family="Arial",
+                size=10,
+            ),
+            text_color=MUTED_TEXT,
+        )
+
+        self.input_folder_path_label.grid(
+            row=4,
+            column=0,
+            pady=(1, 12),
+        )
+
+        self.change_folder_button = ctk.CTkButton(
+            card,
+            text="Change Folder",
             width=150,
-            height=38,
+            height=36,
             corner_radius=10,
-            fg_color=self.ACCENT,
-            hover_color=self.ACCENT_HOVER,
+            fg_color="#F1F2F4",
+            hover_color="#E6E8EC",
+            text_color=TEXT,
+            border_width=1,
+            border_color=CARD_BORDER,
+            command=self.choose_folder,
+        )
+
+        self.change_folder_button.grid(
+            row=5,
+            column=0,
+            pady=(0, 7),
+        )
+
+        self.add_photos_button = ctk.CTkButton(
+            card,
+            text="Add Photos",
+            width=150,
+            height=36,
+            corner_radius=10,
+            fg_color=ACCENT,
+            hover_color=ACCENT_HOVER,
             command=self.choose_photos,
         )
-        choose_button.grid(
-            row=3,
+
+        self.add_photos_button.grid(
+            row=6,
             column=0,
             pady=(0, 18),
         )
 
         self.drop_card = card
 
-    # ----------------------------------------------------------------------
-    # Preset controls
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Preset card
+    # -----------------------------------------------------------------------
 
     def _build_preset_card(self, parent):
-        """Build the theme and preset selection card."""
+        """Build the theme and preset controls."""
 
         card = ctk.CTkFrame(
             parent,
-            fg_color=self.CARD,
-            corner_radius=self.RADIUS,
+            fg_color=CARD,
+            corner_radius=RADIUS,
             border_width=1,
-            border_color=self.CARD_BORDER,
+            border_color=CARD_BORDER,
         )
+
         card.grid(
             row=0,
             column=1,
@@ -366,452 +591,727 @@ class LumaApp:
             padx=(8, 0),
         )
 
-        card.grid_columnconfigure(0, weight=1)
-        card.grid_columnconfigure(1, weight=1)
+        card.grid_columnconfigure(
+            0,
+            weight=1,
+        )
 
-        heading = ctk.CTkLabel(
+        title = ctk.CTkLabel(
             card,
-            text="Choose your look",
+            text="Choose a style",
             font=ctk.CTkFont(
                 family="Arial",
                 size=17,
                 weight="bold",
             ),
-            text_color=self.TEXT,
+            text_color=TEXT,
         )
-        heading.grid(
+
+        title.grid(
             row=0,
             column=0,
-            columnspan=2,
             sticky="w",
-            padx=20,
-            pady=(18, 14),
+            padx=22,
+            pady=(20, 2),
         )
 
-        theme_label = ctk.CTkLabel(
+        subtitle = ctk.CTkLabel(
             card,
-            text="THEME",
-            font=ctk.CTkFont(
-                family="Arial",
-                size=10,
-                weight="bold",
-            ),
-            text_color=self.MUTED_TEXT,
-        )
-        theme_label.grid(
-            row=1,
-            column=0,
-            sticky="w",
-            padx=(20, 8),
-        )
-
-        preset_label = ctk.CTkLabel(
-            card,
-            text="PRESET",
-            font=ctk.CTkFont(
-                family="Arial",
-                size=10,
-                weight="bold",
-            ),
-            text_color=self.MUTED_TEXT,
-        )
-        preset_label.grid(
-            row=1,
-            column=1,
-            sticky="w",
-            padx=(8, 20),
-        )
-
-        categories = get_preset_categories()
-
-        self.theme_menu = ctk.CTkOptionMenu(
-            card,
-            values=categories,
-            height=40,
-            corner_radius=10,
-            fg_color="#F2F3F5",
-            button_color="#E6E8EC",
-            button_hover_color="#DDE0E5",
-            text_color=self.TEXT,
-            dropdown_fg_color="#FFFFFF",
-            dropdown_hover_color="#EEF2FF",
-            dropdown_text_color=self.TEXT,
-            command=self._theme_changed,
-        )
-        self.theme_menu.grid(
-            row=2,
-            column=0,
-            sticky="ew",
-            padx=(20, 8),
-            pady=(6, 18),
-        )
-
-        initial_category = categories[0] if categories else ""
-
-        presets = get_presets_for_category(initial_category)
-
-        self.preset_menu = ctk.CTkOptionMenu(
-            card,
-            values=presets,
-            height=40,
-            corner_radius=10,
-            fg_color="#F2F3F5",
-            button_color="#E6E8EC",
-            button_hover_color="#DDE0E5",
-            text_color=self.TEXT,
-            dropdown_fg_color="#FFFFFF",
-            dropdown_hover_color="#EEF2FF",
-            dropdown_text_color=self.TEXT,
-            command=self._preset_changed,
-        )
-        self.preset_menu.grid(
-            row=2,
-            column=1,
-            sticky="ew",
-            padx=(8, 20),
-            pady=(6, 18),
-        )
-
-        if categories:
-            self.theme_menu.set(categories[0])
-
-        if presets:
-            self.preset_menu.set(presets[0])
-
-    # ----------------------------------------------------------------------
-    # Preview area
-    # ----------------------------------------------------------------------
-
-    def _build_preview(self):
-        """Build the BEFORE and AFTER preview section."""
-
-        preview_section = ctk.CTkFrame(
-            self.main,
-            fg_color="transparent",
-        )
-        preview_section.grid(
-            row=2,
-            column=0,
-            sticky="nsew",
-            padx=48,
-            pady=(8, 8),
-        )
-
-        preview_section.grid_columnconfigure(0, weight=1)
-        preview_section.grid_columnconfigure(1, weight=1)
-        preview_section.grid_rowconfigure(1, weight=1)
-
-        heading = ctk.CTkFrame(
-            preview_section,
-            fg_color="transparent",
-        )
-        heading.grid(
-            row=0,
-            column=0,
-            columnspan=2,
-            sticky="ew",
-            pady=(0, 8),
-        )
-
-        heading.grid_columnconfigure(0, weight=1)
-
-        preview_title = ctk.CTkLabel(
-            heading,
-            text="Preview",
-            font=ctk.CTkFont(
-                family="Arial",
-                size=17,
-                weight="bold",
-            ),
-            text_color=self.TEXT,
-        )
-        preview_title.grid(row=0, column=0, sticky="w")
-
-        self.photo_count_label = ctk.CTkLabel(
-            heading,
-            text="No photos added",
+            text="Pick a theme, then choose a preset",
             font=ctk.CTkFont(
                 family="Arial",
                 size=12,
             ),
-            text_color=self.SECONDARY_TEXT,
-        )
-        self.photo_count_label.grid(row=0, column=1, sticky="e")
-
-        self.before_card = self._create_preview_card(
-            preview_section,
-            "BEFORE",
-            0,
+            text_color=SECONDARY_TEXT,
         )
 
-        self.after_card = self._create_preview_card(
-            preview_section,
-            "AFTER",
-            1,
-        )
-
-    def _create_preview_card(self, parent, label_text, column):
-        """Create one preview card."""
-
-        card = ctk.CTkFrame(
-            parent,
-            fg_color=self.CARD,
-            corner_radius=self.RADIUS,
-            border_width=1,
-            border_color=self.CARD_BORDER,
-        )
-        card.grid(
+        subtitle.grid(
             row=1,
-            column=column,
-            sticky="nsew",
-            padx=(0, 6) if column == 0 else (6, 0),
+            column=0,
+            sticky="w",
+            padx=22,
+            pady=(0, 12),
         )
 
-        card.grid_columnconfigure(0, weight=1)
-        card.grid_rowconfigure(1, weight=1)
+        categories = get_preset_categories()
 
-        label = ctk.CTkLabel(
+        category_values = [
+            display_name(category)
+            for category in categories
+        ]
+
+        self.category_map = dict(
+            zip(
+                category_values,
+                categories,
+            )
+        )
+
+        initial_category = (
+            category_values[0]
+            if category_values
+            else ""
+        )
+
+        self.category_menu = ctk.CTkOptionMenu(
             card,
-            text=label_text,
+            values=category_values
+            or ["No themes available"],
+            width=230,
+            height=38,
+            corner_radius=10,
+            fg_color="#F1F2F4",
+            button_color="#E5E7EB",
+            button_hover_color="#D9DCE1",
+            text_color=TEXT,
+            dropdown_fg_color=CARD,
+            dropdown_hover_color="#EEF1F5",
+            dropdown_text_color=TEXT,
+            command=self._category_changed,
+        )
+
+        self.category_menu.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            padx=22,
+            pady=(0, 8),
+        )
+
+        presets = (
+            get_presets_for_category(
+                self.category_map[
+                    initial_category
+                ]
+            )
+            if initial_category
+            else []
+        )
+
+        preset_values = [
+            display_name(preset)
+            for preset in presets
+        ]
+
+        self.preset_map = dict(
+            zip(
+                preset_values,
+                presets,
+            )
+        )
+
+        self.preset_menu = ctk.CTkOptionMenu(
+            card,
+            values=preset_values
+            or ["No presets available"],
+            width=230,
+            height=38,
+            corner_radius=10,
+            fg_color="#F1F2F4",
+            button_color="#E5E7EB",
+            button_hover_color="#D9DCE1",
+            text_color=TEXT,
+            dropdown_fg_color=CARD,
+            dropdown_hover_color="#EEF1F5",
+            dropdown_text_color=TEXT,
+            command=self._preset_changed,
+        )
+
+        self.preset_menu.grid(
+            row=3,
+            column=0,
+            sticky="ew",
+            padx=22,
+            pady=(0, 20),
+        )
+
+        if preset_values:
+            self.preset_menu.set(
+                preset_values[0]
+            )
+
+    # -----------------------------------------------------------------------
+    # Preview
+    # -----------------------------------------------------------------------
+
+    def _build_preview_section(self, parent):
+        """Build the BEFORE and AFTER preview area."""
+
+        preview_container = ctk.CTkFrame(
+            parent,
+            fg_color="transparent",
+        )
+
+        preview_container.grid(
+            row=2,
+            column=0,
+            sticky="nsew",
+        )
+
+        preview_container.grid_columnconfigure(
+            0,
+            weight=1,
+        )
+
+        preview_container.grid_columnconfigure(
+            1,
+            weight=1,
+        )
+
+        preview_container.grid_rowconfigure(
+            1,
+            weight=1,
+        )
+
+        before_title = ctk.CTkLabel(
+            preview_container,
+            text="BEFORE",
             font=ctk.CTkFont(
                 family="Arial",
-                size=10,
+                size=11,
                 weight="bold",
             ),
-            text_color=self.MUTED_TEXT,
+            text_color=SECONDARY_TEXT,
         )
-        label.grid(
+
+        before_title.grid(
             row=0,
             column=0,
             sticky="w",
-            padx=18,
-            pady=(14, 8),
+            padx=(0, 8),
+            pady=(0, 7),
         )
 
-        image_label = ctk.CTkLabel(
-            card,
+        after_title = ctk.CTkLabel(
+            preview_container,
+            text="AFTER",
+            font=ctk.CTkFont(
+                family="Arial",
+                size=11,
+                weight="bold",
+            ),
+            text_color=SECONDARY_TEXT,
+        )
+
+        after_title.grid(
+            row=0,
+            column=1,
+            sticky="w",
+            padx=(8, 0),
+            pady=(0, 7),
+        )
+
+        self.before_card = ctk.CTkFrame(
+            preview_container,
+            fg_color=CARD,
+            corner_radius=RADIUS,
+            border_width=1,
+            border_color=CARD_BORDER,
+        )
+
+        self.before_card.grid(
+            row=1,
+            column=0,
+            sticky="nsew",
+            padx=(0, 8),
+        )
+
+        self.after_card = ctk.CTkFrame(
+            preview_container,
+            fg_color=CARD,
+            corner_radius=RADIUS,
+            border_width=1,
+            border_color=CARD_BORDER,
+        )
+
+        self.after_card.grid(
+            row=1,
+            column=1,
+            sticky="nsew",
+            padx=(8, 0),
+        )
+
+        self.before_label = ctk.CTkLabel(
+            self.before_card,
             text="Add a photo to see a preview",
             font=ctk.CTkFont(
                 family="Arial",
                 size=13,
             ),
-            text_color=self.MUTED_TEXT,
-        )
-        image_label.grid(
-            row=1,
-            column=0,
-            sticky="nsew",
-            padx=16,
-            pady=(0, 16),
+            text_color=MUTED_TEXT,
         )
 
-        return {
-            "card": card,
-            "image": image_label,
-        }
-
-    # ----------------------------------------------------------------------
-    # Bottom action bar
-    # ----------------------------------------------------------------------
-
-    def _build_bottom_bar(self):
-        """Build the export controls and main edit button."""
-
-        bar = ctk.CTkFrame(
-            self.main,
-            fg_color=self.CARD,
-            corner_radius=0,
-            border_width=1,
-            border_color=self.CARD_BORDER,
+        self.before_label.place(
+            relx=0.5,
+            rely=0.5,
+            anchor="center",
         )
-        bar.grid(
+
+        self.after_label = ctk.CTkLabel(
+            self.after_card,
+            text="Your edited preview will appear here",
+            font=ctk.CTkFont(
+                family="Arial",
+                size=13,
+            ),
+            text_color=MUTED_TEXT,
+        )
+
+        self.after_label.place(
+            relx=0.5,
+            rely=0.5,
+            anchor="center",
+        )
+
+    # -----------------------------------------------------------------------
+    # Bottom bar
+    # -----------------------------------------------------------------------
+
+    def _build_bottom_bar(self, parent):
+        """Build status, progress and processing controls."""
+
+        bottom = ctk.CTkFrame(
+            parent,
+            fg_color="transparent",
+        )
+
+        bottom.grid(
             row=3,
             column=0,
             sticky="ew",
-            pady=(8, 0),
+            pady=(18, 0),
         )
 
-        bar.grid_columnconfigure(0, weight=1)
-
-        left = ctk.CTkFrame(
-            bar,
-            fg_color="transparent",
-        )
-        left.grid(
-            row=0,
-            column=0,
-            sticky="w",
-            padx=48,
-            pady=16,
+        bottom.grid_columnconfigure(
+            0,
+            weight=1,
         )
 
-        self.output_label = ctk.CTkLabel(
-            left,
-            text="Output: Pictures/Luma",
+        self.photo_count_label = ctk.CTkLabel(
+            bottom,
+            text="0 photos",
             font=ctk.CTkFont(
                 family="Arial",
                 size=12,
             ),
-            text_color=self.SECONDARY_TEXT,
-        )
-        self.output_label.pack(side="left")
-
-        output_button = ctk.CTkButton(
-            left,
-            text="Change",
-            width=72,
-            height=30,
-            corner_radius=8,
-            fg_color="#F1F2F4",
-            hover_color="#E6E8EC",
-            text_color=self.TEXT,
-            command=self.choose_output_folder,
-        )
-        output_button.pack(
-            side="left",
-            padx=(10, 0),
+            text_color=SECONDARY_TEXT,
         )
 
-        self.progress = ctk.CTkProgressBar(
-            bar,
-            width=180,
-            height=8,
-            corner_radius=5,
-            progress_color=self.ACCENT,
-        )
-        self.progress.set(0)
-        self.progress.grid(
+        self.photo_count_label.grid(
             row=0,
-            column=1,
-            padx=(10, 18),
+            column=0,
+            sticky="w",
         )
 
         self.status_label = ctk.CTkLabel(
-            bar,
+            bottom,
             text="Ready",
             font=ctk.CTkFont(
                 family="Arial",
                 size=12,
             ),
-            text_color=self.SECONDARY_TEXT,
+            text_color=SECONDARY_TEXT,
         )
+
         self.status_label.grid(
+            row=1,
+            column=0,
+            sticky="w",
+            pady=(2, 0),
+        )
+
+        self.progress = ctk.CTkProgressBar(
+            bottom,
+            width=260,
+            height=8,
+            corner_radius=5,
+        )
+
+        self.progress.grid(
+            row=0,
+            column=1,
+            rowspan=2,
+            padx=18,
+        )
+
+        self.progress.set(0)
+
+        self.output_button = ctk.CTkButton(
+            bottom,
+            text="Open Output",
+            width=115,
+            height=38,
+            corner_radius=10,
+            fg_color="#F1F2F4",
+            hover_color="#E6E8EC",
+            text_color=TEXT,
+            border_width=1,
+            border_color=CARD_BORDER,
+            command=self.open_output_folder,
+        )
+
+        self.output_button.grid(
             row=0,
             column=2,
-            padx=(0, 18),
+            rowspan=2,
+            padx=(0, 10),
         )
 
         self.edit_button = ctk.CTkButton(
-            bar,
+            bottom,
             text="EDIT PHOTOS",
-            width=170,
-            height=46,
-            corner_radius=13,
-            fg_color=self.ACCENT,
-            hover_color=self.ACCENT_HOVER,
+            width=160,
+            height=44,
+            corner_radius=12,
+            fg_color=ACCENT,
+            hover_color=ACCENT_HOVER,
             font=ctk.CTkFont(
                 family="Arial",
                 size=13,
                 weight="bold",
             ),
-            command=self.start_processing,
+            command=self.process_photos,
         )
+
         self.edit_button.grid(
             row=0,
             column=3,
-            padx=(0, 48),
-            pady=10,
+            rowspan=2,
         )
 
-        self._update_output_label()
+    # -----------------------------------------------------------------------
+    # Folder memory
+    # -----------------------------------------------------------------------
 
-    # ----------------------------------------------------------------------
+    @property
+    def settings_file(self) -> Path:
+        """Return the location of Luma's settings file."""
+
+        return (
+            get_settings_folder()
+            / "settings.json"
+        )
+
+    def _load_saved_input_folder(self) -> Path:
+        """Load the user's previously selected input folder."""
+
+        try:
+            if not self.settings_file.exists():
+                return self.default_input_folder
+
+            with self.settings_file.open(
+                "r",
+                encoding="utf-8",
+            ) as file:
+                settings = json.load(file)
+
+            saved_folder = settings.get(
+                "input_folder"
+            )
+
+            if not saved_folder:
+                return self.default_input_folder
+
+            return Path(saved_folder).expanduser()
+
+        except (
+            OSError,
+            json.JSONDecodeError,
+            TypeError,
+        ):
+            # A broken settings file should never stop Luma
+            # from opening.
+            return self.default_input_folder
+
+    def _save_input_folder(self):
+        """Remember the currently selected input folder."""
+
+        try:
+            settings_folder = (
+                self.settings_file.parent
+            )
+
+            settings_folder.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            settings = {
+                "input_folder": str(
+                    self.input_folder
+                ),
+            }
+
+            with self.settings_file.open(
+                "w",
+                encoding="utf-8",
+            ) as file:
+                json.dump(
+                    settings,
+                    file,
+                    indent=4,
+                )
+
+        except OSError:
+            # Folder memory is a convenience, so a failure here
+            # should not prevent the application from working.
+            pass
+
+    def _update_input_folder_display(self):
+        """Update the folder name and path shown in the GUI."""
+
+        self.input_folder_name_label.configure(
+            text=self.input_folder.name
+        )
+
+        self.input_folder_path_label.configure(
+            text=self._shorten_path(
+                self.input_folder
+            )
+        )
+
+    # -----------------------------------------------------------------------
     # Drag and drop
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
 
     def _setup_drag_and_drop(self):
-        """Register the application as a native file drop target."""
+        """Enable drag-and-drop support."""
 
-        self.root.drop_target_register(DND_FILES)
+        self.root.drop_target_register(
+            DND_FILES
+        )
+
         self.root.dnd_bind(
             "<<Drop>>",
             self._handle_drop,
         )
 
     def _handle_drop(self, event):
-        """Handle files dragged onto the Luma window."""
+        """Handle files or folders dropped onto Luma."""
 
-        paths = self.root.tk.splitlist(event.data)
-
-        self._add_photo_paths(
-            [Path(path) for path in paths]
+        paths = self.root.tk.splitlist(
+            event.data
         )
 
-    # ----------------------------------------------------------------------
-    # Photo selection
-    # ----------------------------------------------------------------------
+        collected_paths = []
+
+        for raw_path in paths:
+            path = Path(raw_path)
+
+            if path.is_dir():
+                collected_paths.extend(
+                    self._find_images_in_folder(
+                        path
+                    )
+                )
+
+            elif path.is_file():
+                collected_paths.append(path)
+
+        self._add_photo_paths(
+            collected_paths
+        )
+
+    # -----------------------------------------------------------------------
+    # Folder / photo importing
+    # -----------------------------------------------------------------------
+
+    def choose_folder(self):
+        """Choose and remember a new input folder."""
+
+        folder = filedialog.askdirectory(
+            title="Choose photo folder",
+        )
+
+        if not folder:
+            return
+
+        new_folder = Path(folder)
+
+        # Save the user's choice so it is remembered next time
+        # Luma is opened.
+        self.input_folder = new_folder
+
+        self.input_folder.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        self._save_input_folder()
+        self._update_input_folder_display()
+
+        # Changing folders should replace the current batch rather
+        # than adding another folder's images to it.
+        self.photo_paths.clear()
+        self.example_image_path = None
+
+        self.preview_photo_before = None
+        self.preview_photo_after = None
+
+        self.current_preview_token += 1
+
+        self.before_label.configure(
+            image="",
+            text="Add a photo to see a preview",
+            text_color=MUTED_TEXT,
+        )
+
+        self.after_label.configure(
+            image="",
+            text="Your edited preview will appear here",
+            text_color=MUTED_TEXT,
+        )
+
+        self.load_input_folder()
+
+        self.status_label.configure(
+            text=f"Using {self.input_folder.name}",
+            text_color=SUCCESS,
+        )
 
     def choose_photos(self):
-        """Open the native macOS photo picker."""
+        """Add individual photos to the current batch."""
 
         paths = filedialog.askopenfilenames(
-            title="Choose photos",
+            title="Add photos",
             filetypes=[
                 (
                     "Images",
                     "*.jpg *.jpeg *.png *.webp",
                 ),
-                ("JPEG", "*.jpg *.jpeg"),
-                ("PNG", "*.png"),
-                ("WebP", "*.webp"),
+                (
+                    "JPEG",
+                    "*.jpg *.jpeg",
+                ),
+                (
+                    "PNG",
+                    "*.png",
+                ),
+                (
+                    "WebP",
+                    "*.webp",
+                ),
             ],
         )
 
         if paths:
             self._add_photo_paths(
-                [Path(path) for path in paths]
+                [
+                    Path(path)
+                    for path in paths
+                ]
             )
 
-    def _add_photo_paths(self, paths: list[Path]):
-        """Add supported image files to the current batch."""
+    def load_input_folder(self):
+        """Load all supported images from the active input folder."""
 
-        supported = {
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".webp",
-        }
+        paths = self._find_images_in_folder(
+            self.input_folder
+        )
+
+        if paths:
+            self._add_photo_paths(
+                paths,
+                show_status=False,
+            )
+
+        else:
+            self._update_photo_count()
+
+    def _find_images_in_folder(
+        self,
+        folder: Path,
+    ) -> list[Path]:
+        """Recursively find supported images in a folder."""
+
+        if not folder.exists():
+            return []
+
+        paths = []
+
+        # rglob() allows users to keep images inside subfolders.
+        for path in folder.rglob("*"):
+            if not path.is_file():
+                continue
+
+            if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                continue
+
+            paths.append(path)
+
+        return sorted(paths)
+
+    def _add_photo_paths(
+        self,
+        paths: list[Path],
+        show_status: bool = True,
+    ):
+        """Add valid images to the current batch."""
 
         added = []
 
         for path in paths:
+            try:
+                path = path.resolve()
+            except OSError:
+                continue
+
             if not path.is_file():
                 continue
 
-            if path.suffix.lower() not in supported:
+            if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
                 continue
 
-            if path not in self.photo_paths:
-                self.photo_paths.append(path)
-                added.append(path)
+            if path in self.photo_paths:
+                continue
+
+            self.photo_paths.append(path)
+            added.append(path)
 
         if not added:
             return
 
-        # The very first image added becomes the example image.
         if self.example_image_path is None:
             self.example_image_path = added[0]
 
         self._update_photo_count()
+
+        if show_status:
+            self.status_label.configure(
+                text=(
+                    f"Added {len(added)} photo"
+                    + (
+                        "s"
+                        if len(added) != 1
+                        else ""
+                    )
+                ),
+                text_color=SUCCESS,
+            )
+
         self._show_before_preview()
         self._generate_preview()
 
-    # ----------------------------------------------------------------------
-    # Photo clearing
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Photo count / clearing
+    # -----------------------------------------------------------------------
+
+    def _update_photo_count(self):
+        """Update the photo counter."""
+
+        count = len(self.photo_paths)
+
+        if count == 1:
+            text = "1 photo"
+        else:
+            text = f"{count} photos"
+
+        self.photo_count_label.configure(
+            text=text
+        )
 
     def clear_photos(self):
-        """Remove all photos from the current batch."""
+        """Clear the current batch without changing the input folder."""
 
         if self.processing:
             return
@@ -819,316 +1319,274 @@ class LumaApp:
         self.photo_paths.clear()
         self.example_image_path = None
 
-        self.before_card["image"].configure(
-            image=None,
-            text="Add a photo to see a preview",
-        )
-
-        self.after_card["image"].configure(
-            image=None,
-            text="Add a photo to see a preview",
-        )
-
         self.preview_photo_before = None
         self.preview_photo_after = None
 
+        self.current_preview_token += 1
+
+        self.before_label.configure(
+            image="",
+            text="Add a photo to see a preview",
+            text_color=MUTED_TEXT,
+        )
+
+        self.after_label.configure(
+            image="",
+            text="Your edited preview will appear here",
+            text_color=MUTED_TEXT,
+        )
+
         self._update_photo_count()
-        self._set_status("Ready")
 
-    # ----------------------------------------------------------------------
-    # Preset changes
-    # ----------------------------------------------------------------------
+        self.status_label.configure(
+            text="Ready",
+            text_color=SECONDARY_TEXT,
+        )
 
-    def _theme_changed(self, category: str):
-        """Update the preset dropdown when the theme changes."""
+    # -----------------------------------------------------------------------
+    # Preset controls
+    # -----------------------------------------------------------------------
 
-        presets = get_presets_for_category(category)
+    def _category_changed(
+        self,
+        display_category: str,
+    ):
+        """Update the preset list when the theme changes."""
 
-        if not presets:
-            self.preset_menu.configure(values=[])
+        category = self.category_map.get(
+            display_category
+        )
+
+        if not category:
             return
 
-        self.preset_menu.configure(values=presets)
-        self.preset_menu.set(presets[0])
+        presets = get_presets_for_category(
+            category
+        )
+
+        display_presets = [
+            display_name(preset)
+            for preset in presets
+        ]
+
+        self.preset_map = dict(
+            zip(
+                display_presets,
+                presets,
+            )
+        )
+
+        self.preset_menu.configure(
+            values=display_presets
+            or ["No presets available"]
+        )
+
+        if display_presets:
+            self.preset_menu.set(
+                display_presets[0]
+            )
+
+            self._preset_changed(
+                display_presets[0]
+            )
+
+    def _preset_changed(
+        self,
+        display_preset: str,
+    ):
+        """Regenerate the preview when the preset changes."""
+
+        if display_preset == "No presets available":
+            return
 
         self._generate_preview()
 
-    def _preset_changed(self, _preset_name: str):
-        """Regenerate the example preview after changing preset."""
-
-        self._generate_preview()
-
-    # ----------------------------------------------------------------------
-    # Preview generation
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Preview
+    # -----------------------------------------------------------------------
 
     def _show_before_preview(self):
-        """Display the first added image in the BEFORE panel."""
+        """Display the first imported image in the BEFORE panel."""
 
         if self.example_image_path is None:
             return
 
         try:
-            with Image.open(self.example_image_path) as image:
-                image = ImageOps.exif_transpose(image)
-                image = image.convert("RGB")
+            image = Image.open(
+                self.example_image_path
+            ).convert("RGB")
 
-                preview = self._fit_image(
-                    image,
-                    470,
-                    280,
-                )
-
-                self.preview_photo_before = ImageTk.PhotoImage(preview)
-
-                self.before_card["image"].configure(
-                    image=self.preview_photo_before,
-                    text="",
-                )
+            self._set_preview_image(
+                self.before_label,
+                image,
+                before=True,
+            )
 
         except Exception as error:
-            self.before_card["image"].configure(
-                image=None,
-                text=f"Unable to preview image\n{error}",
+            self.before_label.configure(
+                image="",
+                text="Could not load image",
+                text_color=ERROR,
+            )
+
+            self.status_label.configure(
+                text=f"Could not load preview: {error}",
+                text_color=ERROR,
             )
 
     def _generate_preview(self):
-        """Generate the AFTER preview in a background thread."""
+        """Generate an edited preview in the background."""
 
         if self.example_image_path is None:
             return
 
-        preset_name = self.preset_menu.get()
-        preset = get_preset_by_name(preset_name)
+        display_preset = self.preset_menu.get()
+
+        if not display_preset:
+            return
+
+        preset_name = self.preset_map.get(
+            display_preset
+        )
+
+        if not preset_name:
+            return
+
+        preset = get_preset_by_name(
+            preset_name
+        )
 
         if preset is None:
             return
 
-        # Incrementing the token means an older preview cannot overwrite
-        # a newer preview if the user changes presets quickly.
         self.current_preview_token += 1
+
         token = self.current_preview_token
 
-        self._set_status("Generating preview...")
+        input_path = self.example_image_path
 
-        thread = threading.Thread(
-            target=self._preview_worker,
-            args=(
-                self.example_image_path,
-                preset,
-                token,
-            ),
-            daemon=True,
+        self.after_label.configure(
+            image="",
+            text="Generating preview...",
+            text_color=MUTED_TEXT,
         )
-        thread.start()
 
-    def _preview_worker(self, image_path, preset, token):
-        """Process the example image away from the GUI thread."""
+        def worker():
+            try:
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    output_path = (
+                        Path(temp_dir)
+                        / "preview.jpg"
+                    )
 
-        temp_path = None
+                    process_image(
+                        input_path,
+                        output_path,
+                        preset.settings,
+                    )
 
-        try:
-            with tempfile.NamedTemporaryFile(
-                suffix=image_path.suffix,
-                delete=False,
-            ) as temp_file:
-                temp_path = Path(temp_file.name)
+                    preview = Image.open(
+                        output_path
+                    ).convert("RGB")
 
-            process_image(
-                image_path,
-                temp_path,
-                preset.settings,
-            )
+                    preview.load()
 
-            with Image.open(temp_path) as image:
-                image = ImageOps.exif_transpose(image)
-                image = image.convert("RGB")
-
-                preview = self._fit_image(
-                    image,
-                    470,
-                    280,
+                self.root.after(
+                    0,
+                    lambda: self._finish_preview(
+                        token,
+                        preview,
+                    ),
                 )
 
-                photo = ImageTk.PhotoImage(preview)
+            except Exception as error:
+                self.root.after(
+                    0,
+                    lambda: self._preview_error(
+                        token,
+                        error,
+                    ),
+                )
 
-            self.root.after(
-                0,
-                lambda: self._apply_preview(
-                    photo,
-                    token,
-                ),
-            )
+        threading.Thread(
+            target=worker,
+            daemon=True,
+        ).start()
 
-        except Exception as error:
-            self.root.after(
-                0,
-                lambda: self._preview_failed(
-                    error,
-                    token,
-                ),
-            )
-
-        finally:
-            if temp_path is not None:
-                try:
-                    temp_path.unlink()
-                except OSError:
-                    pass
-
-    def _apply_preview(self, photo, token):
-        """Apply a preview only if it is still the latest request."""
+    def _finish_preview(
+        self,
+        token: int,
+        image: Image.Image,
+    ):
+        """Display a preview if it is still the newest one."""
 
         if token != self.current_preview_token:
             return
 
-        self.preview_photo_after = photo
-
-        self.after_card["image"].configure(
-            image=self.preview_photo_after,
-            text="",
+        self._set_preview_image(
+            self.after_label,
+            image,
+            before=False,
         )
 
-        self._set_status("Ready")
-
-    def _preview_failed(self, error, token):
-        """Display a preview error if it belongs to the latest request."""
+    def _preview_error(
+        self,
+        token: int,
+        error: Exception,
+    ):
+        """Display a preview error."""
 
         if token != self.current_preview_token:
             return
 
-        self.after_card["image"].configure(
-            image=None,
-            text=f"Preview unavailable\n{error}",
+        self.after_label.configure(
+            image="",
+            text="Could not generate preview",
+            text_color=ERROR,
         )
 
-        self._set_status("Preview failed")
+        self.status_label.configure(
+            text=f"Preview error: {error}",
+            text_color=ERROR,
+        )
 
-    # ----------------------------------------------------------------------
-    # Image sizing
-    # ----------------------------------------------------------------------
+    def _set_preview_image(
+        self,
+        label,
+        image: Image.Image,
+        before: bool,
+    ):
+        """Resize an image to fit the preview panel."""
 
-    @staticmethod
-    def _fit_image(image: Image.Image, max_width: int, max_height: int):
-        """Resize an image to fit inside the preview without distortion."""
+        image = image.copy()
 
-        preview = image.copy()
-        preview.thumbnail(
-            (max_width, max_height),
+        image.thumbnail(
+            (470, 280),
             Image.Resampling.LANCZOS,
         )
 
-        canvas = Image.new(
-            "RGB",
-            (max_width, max_height),
-            "#F1F2F4",
+        photo = ImageTk.PhotoImage(
+            image
         )
 
-        x = (max_width - preview.width) // 2
-        y = (max_height - preview.height) // 2
-
-        canvas.paste(
-            preview,
-            (x, y),
+        label.configure(
+            image=photo,
+            text="",
         )
 
-        return canvas
+        # Tkinter needs a Python reference to prevent the image
+        # from being garbage collected.
+        if before:
+            self.preview_photo_before = photo
+        else:
+            self.preview_photo_after = photo
 
-    # ----------------------------------------------------------------------
-    # Output location
-    # ----------------------------------------------------------------------
-
-    def choose_output_folder(self):
-        """Choose the parent directory for Luma exports."""
-
-        folder = filedialog.askdirectory(
-            title="Choose Luma output location",
-        )
-
-        if not folder:
-            return
-
-        self.default_output_root = Path(folder)
-        self._update_output_label()
-
-    def _update_output_label(self):
-        """Update the small output location label."""
-
-        try:
-            display = self.default_output_root.relative_to(
-                Path.home()
-            )
-            display_text = f"Output: ~/{display}"
-        except ValueError:
-            display_text = f"Output: {self.default_output_root}"
-
-        self.output_label.configure(
-            text=display_text,
-        )
-
-    # ----------------------------------------------------------------------
-    # Export folder creation
-    # ----------------------------------------------------------------------
-
-    def _create_export_folder(self, preset_name: str, quantity: int) -> Path:
-        """
-        Create the folder for one Luma export.
-
-        Format:
-            number_preset_images_HH-MM_DD-MM-YY
-
-        Example:
-            12_cinematic_images_01-23_21-09-26
-
-        If a folder with the same name already exists, a numeric suffix
-        is added so existing exports are never overwritten.
-        """
-
-        luma_output = (
-            self.default_output_root / "Luma_Output"
-        )
-
-        luma_output.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        timestamp = datetime.now().strftime(
-            "%H-%M_%d-%m-%y"
-        )
-
-        clean_preset = (
-            preset_name
-            .lower()
-            .replace(" ", "-")
-            .replace("/", "-")
-        )
-
-        base_name = (
-            f"{quantity}_{clean_preset}_images_{timestamp}"
-        )
-
-        folder = luma_output / base_name
-
-        counter = 2
-
-        while folder.exists():
-            folder = luma_output / f"{base_name}_{counter}"
-            counter += 1
-
-        folder.mkdir(
-            parents=True,
-            exist_ok=False,
-        )
-
-        return folder
-
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # Processing
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
 
-    def start_processing(self):
-        """Start processing the current photo batch."""
+    def process_photos(self):
+        """Process every currently loaded photo."""
 
         if self.processing:
             return
@@ -1136,12 +1594,26 @@ class LumaApp:
         if not self.photo_paths:
             messagebox.showinfo(
                 "No photos",
-                "Add at least one photo before editing.",
+                "Add some photos before editing them.",
             )
             return
 
-        preset_name = self.preset_menu.get()
-        preset = get_preset_by_name(preset_name)
+        display_preset = self.preset_menu.get()
+
+        preset_name = self.preset_map.get(
+            display_preset
+        )
+
+        if not preset_name:
+            messagebox.showerror(
+                "No preset",
+                "Please choose a preset.",
+            )
+            return
+
+        preset = get_preset_by_name(
+            preset_name
+        )
 
         if preset is None:
             messagebox.showerror(
@@ -1151,137 +1623,123 @@ class LumaApp:
             return
 
         self.processing = True
-        self.edit_button.configure(
-            text="EDITING...",
-            state="disabled",
-        )
 
         self.progress.set(0)
 
-        self._set_status(
-            f"Preparing {len(self.photo_paths)} photos..."
+        self.edit_button.configure(
+            state="disabled",
+            text="EDITING...",
         )
 
-        thread = threading.Thread(
-            target=self._processing_worker,
+        self.clear_button.configure(
+            state="disabled"
+        )
+
+        self.change_folder_button.configure(
+            state="disabled"
+        )
+
+        self.add_photos_button.configure(
+            state="disabled"
+        )
+
+        self.status_label.configure(
+            text="Preparing photos...",
+            text_color=SECONDARY_TEXT,
+        )
+
+        photos = list(
+            self.photo_paths
+        )
+
+        threading.Thread(
+            target=self._process_worker,
             args=(
-                list(self.photo_paths),
-                preset_name,
-                preset.settings,
+                photos,
+                preset,
             ),
             daemon=True,
-        )
-        thread.start()
+        ).start()
 
-    def _processing_worker(
+    def _process_worker(
         self,
-        photo_paths: list[Path],
-        preset_name: str,
-        settings: dict,
+        photos: list[Path],
+        preset,
     ):
-        """Process the entire batch in a background thread."""
+        """Process the batch in a background thread."""
+
+        total = len(photos)
 
         successful = 0
         failed = 0
 
-        try:
-            output_folder = self._create_export_folder(
-                preset_name,
-                len(photo_paths),
-            )
+        output_folder = self._create_output_folder(
+            total,
+            preset.name,
+        )
 
-            total = len(photo_paths)
-
-            for index, input_path in enumerate(photo_paths, start=1):
-
+        for index, input_path in enumerate(
+            photos,
+            start=1,
+        ):
+            try:
                 output_path = (
-                    output_folder / input_path.name
+                    self._get_unique_output_path(
+                        output_folder,
+                        input_path.name,
+                    )
                 )
 
-                # Avoid accidentally overwriting a file if two selected
-                # images have the same filename from different folders.
-                output_path = self._unique_file_path(
-                    output_path
+                process_image(
+                    input_path,
+                    output_path,
+                    preset.settings,
                 )
 
-                try:
-                    process_image(
-                        input_path,
-                        output_path,
-                        settings,
-                    )
+                successful += 1
 
-                    successful += 1
+            except Exception:
+                failed += 1
 
-                except Exception as error:
-                    failed += 1
+            progress = index / total
 
-                    print(
-                        f"Failed to process "
-                        f"{input_path}: {error}"
-                    )
-
-                progress = index / total
-
-                self.root.after(
-                    0,
-                    lambda p=progress, i=index, t=total:
-                    self._update_processing_progress(
-                        p,
-                        i,
-                        t,
+            self.root.after(
+                0,
+                lambda
+                value=progress,
+                current=index,
+                total_count=total:
+                    self._update_progress(
+                        value,
+                        current,
+                        total_count,
                     ),
-                )
-
-            self.last_output_folder = output_folder
-
-            self.root.after(
-                0,
-                lambda: self._processing_finished(
-                    output_folder,
-                    successful,
-                    failed,
-                ),
             )
 
-        except Exception as error:
-            self.root.after(
-                0,
-                lambda: self._processing_error(error),
-            )
+        self.root.after(
+            0,
+            lambda: self._processing_finished(
+                output_folder,
+                successful,
+                failed,
+            ),
+        )
 
-    @staticmethod
-    def _unique_file_path(path: Path) -> Path:
-        """Return a non-conflicting output path."""
-
-        if not path.exists():
-            return path
-
-        counter = 2
-
-        while True:
-            candidate = (
-                path.parent
-                / f"{path.stem}_{counter}{path.suffix}"
-            )
-
-            if not candidate.exists():
-                return candidate
-
-            counter += 1
-
-    def _update_processing_progress(
+    def _update_progress(
         self,
-        progress: float,
+        value: float,
         current: int,
         total: int,
     ):
-        """Update the progress bar safely on the GUI thread."""
+        """Update progress safely on the UI thread."""
 
-        self.progress.set(progress)
+        self.progress.set(value)
 
-        self._set_status(
-            f"Editing {current} of {total}..."
+        self.status_label.configure(
+            text=(
+                f"Editing {current} "
+                f"of {total}..."
+            )
         )
 
     def _processing_finished(
@@ -1290,136 +1748,233 @@ class LumaApp:
         successful: int,
         failed: int,
     ):
-        """Handle successful completion of a batch."""
+        """Restore the interface after processing."""
 
         self.processing = False
 
+        self.last_output_folder = output_folder
+
         self.edit_button.configure(
-            text="EDIT PHOTOS",
             state="normal",
+            text="EDIT PHOTOS",
+        )
+
+        self.clear_button.configure(
+            state="normal"
+        )
+
+        self.change_folder_button.configure(
+            state="normal"
+        )
+
+        self.add_photos_button.configure(
+            state="normal"
         )
 
         self.progress.set(1)
 
         if failed == 0:
-            self._set_status(
-                f"{successful} photos edited"
+            status = (
+                f"Finished — {successful} photo"
+                + (
+                    "s"
+                    if successful != 1
+                    else ""
+                )
+                + " edited successfully."
             )
+
+            self.status_label.configure(
+                text=status,
+                text_color=SUCCESS,
+            )
+
         else:
-            self._set_status(
-                f"{successful} edited, {failed} failed"
+            status = (
+                f"Finished — {successful} succeeded, "
+                f"{failed} failed."
             )
 
-        message = (
-            f"{successful} photo"
-            f"{'s' if successful != 1 else ''} edited successfully."
-        )
-
-        if failed:
-            message += (
-                f"\n\n{failed} photo"
-                f"{'s' if failed != 1 else ''} failed."
+            self.status_label.configure(
+                text=status,
+                text_color=ERROR,
             )
 
-        message += (
-            f"\n\nSaved to:\n{output_folder}"
-        )
-
-        answer = messagebox.askyesno(
+        result = messagebox.askyesno(
             "Luma finished",
-            message + "\n\nOpen the output folder?",
+            (
+                f"{successful} photo"
+                + (
+                    "s"
+                    if successful != 1
+                    else ""
+                )
+                + " edited successfully.\n\n"
+                + (
+                    f"{failed} photo"
+                    + (
+                        "s"
+                        if failed != 1
+                        else ""
+                    )
+                    + " failed.\n\n"
+                    if failed
+                    else ""
+                )
+                + "Open the output folder?"
+            ),
         )
 
-        if answer:
+        if result:
             self.open_output_folder()
 
-    def _processing_error(self, error):
-        """Handle an error that prevented the batch from starting."""
+    # -----------------------------------------------------------------------
+    # Output handling
+    # -----------------------------------------------------------------------
 
-        self.processing = False
+    def _create_output_folder(
+        self,
+        count: int,
+        preset_name: str,
+    ) -> Path:
+        """
+        Create a timestamped output folder.
 
-        self.edit_button.configure(
-            text="EDIT PHOTOS",
-            state="normal",
+        Example:
+        12_cinematic_images_01-23_21-09-26
+        """
+
+        timestamp = datetime.now().strftime(
+            "%H-%M_%d-%m-%y"
         )
 
-        self.progress.set(0)
-        self._set_status("Export failed")
-
-        messagebox.showerror(
-            "Luma export failed",
-            str(error),
+        folder_name = (
+            f"{count}_"
+            f"{preset_name}_"
+            f"images_"
+            f"{timestamp}"
         )
 
-    # ----------------------------------------------------------------------
-    # Output opening
-    # ----------------------------------------------------------------------
+        output_folder = (
+            self.output_folder
+            / folder_name
+        )
+
+        counter = 2
+
+        while output_folder.exists():
+            output_folder = (
+                self.output_folder
+                / f"{folder_name}_{counter}"
+            )
+
+            counter += 1
+
+        output_folder.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        return output_folder
+
+    def _get_unique_output_path(
+        self,
+        output_folder: Path,
+        filename: str,
+    ) -> Path:
+        """Prevent duplicate filenames from being overwritten."""
+
+        output_path = (
+            output_folder
+            / filename
+        )
+
+        if not output_path.exists():
+            return output_path
+
+        original = Path(filename)
+
+        stem = original.stem
+        suffix = original.suffix
+
+        counter = 2
+
+        while True:
+            output_path = (
+                output_folder
+                / f"{stem}_{counter}{suffix}"
+            )
+
+            if not output_path.exists():
+                return output_path
+
+            counter += 1
 
     def open_output_folder(self):
-        """Open the most recent Luma export folder in Finder."""
+        """Open the Luma_Output folder or latest export."""
 
-        if self.last_output_folder is None:
-            return
+        folder = (
+            self.last_output_folder
+            if (
+                self.last_output_folder
+                and self.last_output_folder.exists()
+            )
+            else self.output_folder
+        )
 
         try:
-            import subprocess
+            if sys.platform == "darwin":
+                subprocess.run(
+                    ["open", str(folder)],
+                    check=False,
+                )
 
-            subprocess.run(
-                [
-                    "open",
-                    str(self.last_output_folder),
-                ],
-                check=False,
-            )
+            elif sys.platform == "win32":
+                os.startfile(str(folder))
+
+            else:
+                subprocess.run(
+                    ["xdg-open", str(folder)],
+                    check=False,
+                )
 
         except Exception as error:
             messagebox.showerror(
-                "Unable to open folder",
+                "Could not open folder",
                 str(error),
             )
 
-    # ----------------------------------------------------------------------
-    # Status
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Utility
+    # -----------------------------------------------------------------------
 
-    def _set_status(self, text: str):
-        """Update the status label."""
+    @staticmethod
+    def _shorten_path(path: Path) -> str:
+        """Make a long folder path easier to display."""
 
-        self.status_label.configure(
-            text=text,
-        )
+        text = str(path)
 
-    def _update_photo_count(self):
-        """Update the number of photos currently selected."""
+        if len(text) <= 55:
+            return text
 
-        count = len(self.photo_paths)
+        return "..." + text[-52:]
 
-        if count == 0:
-            text = "No photos added"
-        elif count == 1:
-            text = "1 photo added"
-        else:
-            text = f"{count} photos added"
 
-        self.photo_count_label.configure(
-            text=text,
-        )
-
-    # ----------------------------------------------------------------------
-    # Application start
-    # ----------------------------------------------------------------------
-
-    def run(self):
-        """Start the Luma event loop."""
-
-        self.root.mainloop()
-
+# ---------------------------------------------------------------------------
+# Application entry point
+# ---------------------------------------------------------------------------
 
 def main():
-    """Application entry point."""
+    """Start the Luma GUI."""
 
-    app = LumaApp()
-    app.run()
+    if DND_AVAILABLE:
+        root = TkinterDnD.Tk()
+    else:
+        root = tk.Tk()
+
+    LumaApp(root)
+
+    root.mainloop()
 
 
 if __name__ == "__main__":
