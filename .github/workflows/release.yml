@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   test:
     name: Run tests
@@ -12,10 +15,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.14"
 
@@ -28,50 +31,71 @@ jobs:
       - name: Run tests
         run: pytest
 
-  build:
-    name: Build package
-    runs-on: ubuntu-latest
+  build-macos:
+    name: Build macOS application
+    runs-on: macos-15
     needs: test
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.14"
 
-      - name: Install build
-        run: python -m pip install build
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
 
-      - name: Build distributions
-        run: python -m build
+      - name: Install PyInstaller
+        run: pip install pyinstaller
 
-      - name: Store distributions
-        uses: actions/upload-artifact@v5
+      - name: Build Luma.app
+        run: |
+          pyinstaller \
+            --clean \
+            --windowed \
+            --name Luma \
+            --osx-bundle-identifier com.benjaminbristow.luma \
+            src/luma/gui.py
+
+      - name: Create DMG staging folder
+        run: |
+          mkdir dmg
+          cp -R dist/Luma.app dmg/
+          ln -s /Applications dmg/Applications
+
+      - name: Build Luma.dmg
+        run: |
+          hdiutil create \
+            -volname "Luma" \
+            -srcfolder dmg \
+            -ov \
+            -format UDZO \
+            Luma.dmg
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
         with:
-          name: luma-distributions
-          path: dist/
+          name: Luma-macOS
+          path: Luma.dmg
 
-  publish:
-    name: Publish to PyPI
+  release:
+    name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: build
-
-    environment:
-      name: pypi
-      url: https://pypi.org/p/luma
-
-    permissions:
-      id-token: write
+    needs: build-macos
 
     steps:
-      - name: Download distributions
-        uses: actions/download-artifact@v6
+      - name: Download DMG
+        uses: actions/download-artifact@v4
         with:
-          name: luma-distributions
-          path: dist/
+          name: Luma-macOS
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Luma.dmg
+          generate_release_notes: true
