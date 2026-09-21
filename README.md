@@ -1,27 +1,125 @@
-# Photo-Editor
-A place to automatically edit all your photos for you 
-
 # Luma
 
-Luma is a command-line batch image editor built with Python.
+Luma is a Python batch photo editor with a modern graphical interface and command-line interface.
 
-It applies reusable image-processing operations through a collection of themed presets, allowing multiple photographs to be edited consistently from the terminal.
+It allows multiple photographs to be edited consistently using a collection of themed presets and reusable image-processing operations.
+
+The GUI is designed to make Luma accessible to normal users without requiring knowledge of the command line.
 
 ## Features
 
-* Batch process multiple images
-* 30+ built-in image presets
-* Themed preset categories
-* Custom input and output directories
+* Modern graphical interface
+* Drag-and-drop photo importing
+* Before and after image previews
+* 41 built-in presets
+* Presets organised into themed categories
+* Batch processing of multiple photographs
+* Recursive folder processing
 * JPEG, PNG and WebP support
-* NumPy-powered image processing for improved performance
-* Individual reusable image-processing operations
+* Custom input and output directories
+* Automatic export folders
 * Progress reporting during batch processing
 * Processing time measurement
-* Per-image error handling so one failed image does not stop the batch
-* Installable command-line interface
+* Per-image error handling
+* Reusable image-processing operations
+* NumPy-powered image processing
+* Command-line interface for advanced users
 
-## Preset Categories
+## Installation
+
+Luma can be installed from PyPI using pip:
+
+```bash
+pip install luma
+```
+
+After installation, launch the graphical interface with:
+
+```bash
+luma
+```
+
+To update an existing installation:
+
+```bash
+pip install --upgrade luma
+```
+
+## Graphical Interface
+
+The Luma GUI provides a simple workflow for editing photographs.
+
+```text
+Add photos
+    ↓
+Choose a theme
+    ↓
+Choose a preset
+    ↓
+Preview the result
+    ↓
+Edit photos
+    ↓
+Export edited photos
+```
+
+Photos can be added using the file picker or by dragging them directly into Luma.
+
+The first added photograph is used as the example image for the before and after preview.
+
+Changing the selected preset generates a new preview without processing the entire batch.
+
+## Command-Line Interface
+
+Luma also provides a command-line interface for users who prefer working from the terminal.
+
+The CLI can be launched using:
+
+```bash
+luma-cli
+```
+
+### Apply a preset
+
+```bash
+luma-cli --cinematic
+```
+
+```bash
+luma-cli --aurora
+```
+
+```bash
+luma-cli --forest
+```
+
+```bash
+luma-cli --noir
+```
+
+```bash
+luma-cli --dreamy
+```
+
+### Custom input and output directories
+
+Luma uses `input/` and `output/` by default, but both directories can be changed.
+
+```bash
+luma-cli --cinematic --input photos --output edited
+```
+
+### List available presets
+
+```bash
+luma-cli --presets
+```
+
+This displays the available presets grouped by category.
+
+## Presets
+
+Luma currently includes 41 built-in presets organised into themed categories.
 
 ### Dark & Cinematic
 
@@ -82,31 +180,27 @@ It applies reusable image-processing operations through a collection of themed p
 * `concrete`
 * `urban`
 
-## How It Works
+## How Luma Works
 
-Luma separates the application into several layers.
+Luma separates image processing into several layers.
 
 ```text
-CLI
- ↓
+GUI / CLI
+    ↓
 Preset
- ↓
+    ↓
 Processor
- ↓
+    ↓
 Operations
- ↓
+    ↓
 Output Image
 ```
-
-### CLI
-
-The command-line interface handles user input and determines which preset should be used.
 
 ### Presets
 
 Presets define **what** changes should be made to an image.
 
-For example, the `aurora` preset combines adjustments to:
+For example, the `aurora` preset combines multiple adjustments including:
 
 * Contrast
 * Saturation
@@ -115,18 +209,20 @@ For example, the `aurora` preset combines adjustments to:
 * Warmth
 * Exposure
 * Vignette
-* Sharpness
-* Individual colour ranges
+* Sharpening
+* Colour grading
 
 ### Processor
 
 The processor controls the order in which image operations are applied and handles batch processing.
 
+Each image is processed independently so that a failure with one image does not stop the rest of the batch.
+
 ### Operations
 
-Individual operations handle **how** an adjustment is performed.
+Individual operation modules define **how** an adjustment is performed.
 
-Examples include:
+Luma currently includes operations for:
 
 * Contrast
 * Saturation
@@ -143,18 +239,92 @@ Examples include:
 * Sharpen
 * Vignette
 
-This separation makes it possible to create new presets without rewriting the underlying image-processing logic.
+This separation makes it possible to create and modify presets without rewriting the underlying image-processing logic.
 
-## Installation
+## Supported Images
 
-Clone the repository:
+Luma currently supports:
+
+* `.jpg`
+* `.jpeg`
+* `.png`
+* `.webp`
+
+## Exporting
+
+The GUI automatically creates a separate export folder for each batch.
+
+Folders use the following format:
+
+```text
+<number>_<preset>_images_<HH-MM>_<DD-MM-YY>
+```
+
+For example:
+
+```text
+12_cinematic_images_01-23_21-09-26
+```
+
+Existing exports are never overwritten. If the same folder name already exists, Luma automatically creates a numbered version.
+
+## Error Handling
+
+Luma is designed to continue processing when individual files cannot be accessed or processed.
+
+Filesystem errors such as inaccessible files, missing files and permission errors are handled without terminating the entire batch.
+
+When an individual image fails, Luma reports the error and continues processing the remaining images.
+
+## Performance
+
+Image processing uses NumPy for operations that require per-pixel calculations.
+
+This allows image arrays to be processed using vectorised operations rather than slow Python-level pixel processing.
+
+Batch processing also measures the total processing time.
+
+Example:
+
+```text
+Processing complete.
+  Successful: 7
+  Failed:     0
+  Time:       12.29 seconds
+```
+
+## Technologies
+
+* Python
+* Pillow
+* NumPy
+* CustomTkinter
+* tkinterdnd2
+* tqdm
+* setuptools
+* pytest
+
+## Development
+
+Luma is developed as a portfolio project with an emphasis on:
+
+* Clean project structure
+* Separation of concerns
+* Reusable components
+* Maintainable Python code
+* Performance
+* Error handling
+* Automated testing
+* User-friendly application design
+
+### Clone the repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/BenjaminBristow/luma.git
 cd luma
 ```
 
-Create a virtual environment:
+### Create a virtual environment
 
 ```bash
 python3 -m venv .venv
@@ -166,70 +336,29 @@ Activate it:
 source .venv/bin/activate
 ```
 
-Install Luma in editable mode:
+### Install in editable mode
 
 ```bash
 pip install -e .
 ```
 
-## Usage
-
-Place images inside the `input/` directory.
-
-Then run a preset:
+### Run the GUI
 
 ```bash
-luma --cinematic
+luma
 ```
 
-Processed images will be placed in:
-
-```text
-output/
-```
-
-### Using a Different Preset
+### Run the CLI
 
 ```bash
-luma --aurora
+luma-cli --cinematic
 ```
+
+### Run the tests
 
 ```bash
-luma --forest
+pytest
 ```
-
-```bash
-luma --noir
-```
-
-```bash
-luma --dreamy
-```
-
-### Custom Input and Output Directories
-
-Luma uses `input/` and `output/` by default, but both directories can be changed.
-
-```bash
-luma --cinematic --input photos --output edited
-```
-
-### List Available Presets
-
-```bash
-luma --presets
-```
-
-This displays the available presets grouped by category.
-
-## Supported Images
-
-Luma currently supports:
-
-* `.jpg`
-* `.jpeg`
-* `.png`
-* `.webp`
 
 ## Project Structure
 
@@ -238,10 +367,10 @@ luma/
 ├── input/
 ├── output/
 ├── src/
-│   ├── test_luma.py
 │   └── luma/
 │       ├── __init__.py
 │       ├── cli.py
+│       ├── gui.py
 │       ├── processor.py
 │       │
 │       ├── operations/
@@ -264,75 +393,18 @@ luma/
 │           ├── base.py
 │           ├── cinematic.py
 │           ├── aurora.py
-│           ├── ...
-│           └── urban.py
+│           ├── retro.py
+│           ├── forest.py
+│           ├── ocean.py
+│           ├── noir.py
+│           └── ...
 │
+├── tests/
 ├── .gitignore
 ├── pyproject.toml
 └── README.md
 ```
 
-## Performance
-
-Image processing uses NumPy for operations that require per-pixel calculations.
-
-This allows large image arrays to be processed using vectorised operations rather than slow Python-level pixel-by-pixel loops.
-
-Batch processing also measures the total processing time and reports successful and failed images.
-
-Example:
-
-```text
-Processing: IMG_7965.jpeg [14%]
-Processing: IMG_7914.jpeg [28%]
-Processing: IMG_7900.jpeg [42%]
-
-Processing complete.
-  Successful: 7
-  Failed:     0
-  Time:       12.29 seconds
-```
-
-## Error Handling
-
-Each image is processed independently.
-
-If an individual image cannot be processed, Luma reports the error and continues processing the remaining images rather than terminating the entire batch.
-
-## Technologies
-
-* Python
-* Pillow
-* NumPy
-* argparse
-* pathlib
-* setuptools
-
-## Development
-
-Luma is being developed as a portfolio project with an emphasis on:
-
-* Clean project structure
-* Reusable components
-* Separation of concerns
-* Performance
-* Error handling
-* Command-line application design
-* Maintainable Python code
-
-## Future Development
-
-Planned improvements include:
-
-* Comprehensive pytest test suite
-* More robust filesystem traversal
-* Improved handling of filesystem errors
-* More detailed preset information
-* Improved CLI output
-* Additional image operations
-* Further preset tuning
-* Packaging and distribution improvements
-
 ## Licence
 
-This project is currently for educational and portfolio purposes.
+This project is currently developed as an educational and portfolio project.
