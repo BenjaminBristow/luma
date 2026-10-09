@@ -16,8 +16,6 @@ dependencies = [
     "Pillow",
     "numpy",
     "tqdm",
-    "customtkinter",
-    "tkinterdnd2",
     "pywebview",
 ]
 
@@ -27,7 +25,7 @@ Repository = "https://github.com/BenjaminBristow/luma"
 Issues = "https://github.com/BenjaminBristow/luma/issues"
 
 [project.scripts]
-luma = "luma.gui:main"
+luma = "luma.app.main:main"
 luma-cli = "luma.cli:main"
 luma-app = "luma.app.main:main"
 

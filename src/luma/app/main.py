@@ -916,9 +916,19 @@ def main():
     window = webview.create_window(
         "Luma",
         (
-            Path(__file__).parent
-            / "web"
-            / "index.html"
+            (
+                Path(sys._MEIPASS)
+                / "luma"
+                / "app"
+                / "web"
+                / "index.html"
+            )
+            if getattr(sys, "frozen", False)
+            else (
+                Path(__file__).parent
+                / "web"
+                / "index.html"
+            )
         ).as_uri(),
         js_api=api,
         width=1450,

@@ -4,7 +4,7 @@ Luma is a Python batch photo editor with a modern graphical interface and comman
 
 It allows multiple photographs to be edited consistently using a collection of themed presets and reusable image-processing operations.
 
-The GUI is designed to make Luma accessible to normal users without requiring knowledge of the command line.
+The desktop interface is built with HTML, CSS, and JavaScript and runs in a native window powered by PyWebView.
 
 ## Features
 
@@ -185,7 +185,7 @@ Luma currently includes 41 built-in presets organised into themed categories.
 Luma separates image processing into several layers.
 
 ```text
-GUI / CLI
+Desktop App / CLI
     ↓
 Preset
     ↓
@@ -298,8 +298,8 @@ Processing complete.
 * Python
 * Pillow
 * NumPy
-* CustomTkinter
-* tkinterdnd2
+* HTML, CSS and JavaScript
+* PyWebView
 * tqdm
 * setuptools
 * pytest
@@ -370,7 +370,15 @@ luma/
 │   └── luma/
 │       ├── __init__.py
 │       ├── cli.py
-│       ├── gui.py
+│       ├── app/
+│       │   ├── __init__.py
+│       │   ├── main.py
+│       │   └── web/
+│       │       ├── index.html
+│       │       ├── css/
+│       │       │   └── style.css
+│       │       └── js/
+│       │           └── app.js
 │       ├── processor.py
 │       │
 │       ├── operations/

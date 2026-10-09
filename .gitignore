@@ -4,41 +4,26 @@ __pycache__/
 *.egg-info/
 .venv/
 
-# Testing
-.pytest_cache/
-.coverage
-
-# PyInstaller
-build/
-dist/
-*.spec
-
-# Virtual environment
-.venv/
-
-# Python cache files
-__pycache__/
-*.py[cod]
-
-# Test and coverage files
+# Testing and coverage
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Ignore image files inside input/output
+# PyInstaller build output
+build/
+dist/
+*.spec
+*.dmg
+
+# Local input/output images, preserving directory placeholders
 input/*
 !input/.gitkeep
-
 output/*
 !output/.gitkeep
 
-# macOS files
+# macOS
 .DS_Store
-*.dmg
 
 # IDE/editor files
 .vscode/
 .idea/
-
-# Build/package files
-*.egg-info/
