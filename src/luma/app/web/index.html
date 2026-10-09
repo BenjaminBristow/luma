@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Luma</title>
+
+    <link
+        rel="stylesheet"
+        href="css/style.css"
+    >
+
+</head>
+
+
+<body>
+
+<div id="app">
+
+
+    <!-- SIDEBAR -->
+
+    <aside id="sidebar">
+
+        <div id="brand">
+            LUMA
+        </div>
+
+
+        <button class="nav-button active">
+            Home
+        </button>
+
+        <button class="nav-button">
+            Presets
+        </button>
+
+        <button class="nav-button">
+            Settings
+        </button>
+
+        <button class="nav-button">
+            About
+        </button>
+
+    </aside>
+
+
+    <!-- MAIN -->
+
+    <main id="main">
+
+
+        <!-- TOP -->
+
+        <header id="topbar">
+
+            <div>
+
+                <h1>
+                    Photo workspace
+                </h1>
+
+                <p>
+                    Browse your input folder and edit any photo with Luma presets
+                </p>
+
+            </div>
+
+
+            <button
+                id="clear-button"
+                class="secondary-button"
+            >
+                Clear batch
+            </button>
+
+        </header>
+
+
+        <!-- WORKSPACE -->
+
+        <section id="workspace">
+
+
+            <!-- LEFT -->
+
+            <section id="left-column">
+
+
+                <!-- INPUT FOLDER -->
+
+                <div class="panel input-panel">
+
+                    <div class="panel-heading">
+                        INPUT FOLDER
+                    </div>
+
+                    <div
+                        id="input-folder-name"
+                        class="large-text"
+                    >
+                        Luma_Input
+                    </div>
+
+                    <div
+                        id="input-folder-path"
+                        class="secondary-text"
+                    >
+                    </div>
+
+                    <div
+                        id="folder-status"
+                        class="folder-status"
+                    >
+                        ● Watching folder
+                    </div>
+
+                    <button
+                        id="change-folder-button"
+                        class="secondary-button"
+                    >
+                        Change folder
+                    </button>
+
+                </div>
+
+
+                <!-- PREVIEW -->
+
+                <div
+                    id="comparison-panel"
+                    class="panel"
+                >
+
+                    <div class="panel-header">
+
+                        <span>
+                            BEFORE / AFTER
+                        </span>
+
+                        <span>
+                            Drag divider
+                        </span>
+
+                    </div>
+
+
+                    <div id="preview">
+
+                        <div
+                            id="preview-empty"
+                            class="preview-empty"
+                        >
+                            Select a photo to preview it
+                        </div>
+
+
+                        <img
+                            id="before-image"
+                            class="preview-image"
+                            draggable="false"
+                        >
+
+                        <div
+                            id="after-container"
+                        >
+
+                            <img
+                                id="after-image"
+                                class="preview-image"
+                                draggable="false"
+                            >
+
+                        </div>
+
+
+                        <div
+                            id="preview-divider"
+                        >
+
+                            <div id="preview-handle">
+                                ↔
+                            </div>
+
+                        </div>
+
+
+                        <div
+                            id="before-label"
+                            class="preview-label"
+                        >
+                            BEFORE
+                        </div>
+
+                        <div
+                            id="after-label"
+                            class="preview-label"
+                        >
+                            AFTER
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- CAROUSEL -->
+
+                <div id="carousel-section">
+
+                    <div id="carousel-heading">
+
+                        <span>
+                            PHOTOS
+                        </span>
+
+                        <span>
+                            Scroll, drag, or use the arrows
+                        </span>
+
+                    </div>
+
+
+                    <div id="carousel-wrapper">
+
+                        <button
+                            id="carousel-left"
+                            class="carousel-arrow"
+                        >
+                            ‹
+                        </button>
+
+
+                        <div
+                            id="carousel"
+                            tabindex="0"
+                        >
+
+                            <div id="carousel-track">
+                            </div>
+
+                        </div>
+
+
+                        <button
+                            id="carousel-right"
+                            class="carousel-arrow"
+                        >
+                            ›
+                        </button>
+
+                    </div>
+
+
+                    <div id="carousel-footer">
+
+                        <span id="selected-photo-label">
+                            No photos
+                        </span>
+
+                        <span>
+                            Blue = selected • Grey = hover
+                        </span>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- RIGHT -->
+
+            <aside id="preset-panel" class="panel">
+
+                <div class="panel-heading">
+                    PRESETS
+                </div>
+
+                <h2>
+                    Choose your look
+                </h2>
+
+
+                <select id="category-select">
+                </select>
+
+
+                <div id="preset-list">
+                </div>
+
+            </aside>
+
+
+        </section>
+
+
+        <!-- BOTTOM -->
+
+        <footer id="status-bar">
+
+            <span id="photo-count">
+                0 photos
+            </span>
+
+            <span id="status">
+                Ready
+            </span>
+
+
+            <div id="progress-container">
+
+                <div id="progress">
+                </div>
+
+            </div>
+
+
+            <button
+                id="open-output-button"
+                class="secondary-button"
+            >
+                OPEN OUTPUT
+            </button>
+
+
+            <button
+                id="add-photos-button"
+                class="secondary-button"
+            >
+                ADD PHOTOS
+            </button>
+
+
+            <button
+                id="edit-button"
+                class="primary-button"
+            >
+                EDIT PHOTOS
+            </button>
+
+        </footer>
+
+    </main>
+
+</div>
+
+
+<script src="js/app.js"></script>
+
+</body>
+
+</html>
+
