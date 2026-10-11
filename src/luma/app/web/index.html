@@ -1,362 +1,234 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-
 <head>
-
-    <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-    <title>Luma</title>
-
-    <link
-        rel="stylesheet"
-        href="css/style.css"
-    >
-
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Luma — Photo Studio</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/app.js" defer></script>
 </head>
-
-
 <body>
+  <div class="app-shell" id="app">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Luma home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 36 36"><path d="M18 3.5 21.8 14l10.7 4-10.7 3.9L18 32.5l-3.9-10.6L3.5 18l10.6-4L18 3.5Z"/><circle cx="27.5" cy="8.5" r="2.5"/></svg>
+        </span>
+        <span class="brand-word">luma<span class="brand-period">.</span></span>
+        <span class="brand-divider"></span>
+        <span class="brand-subtitle">PHOTO STUDIO</span>
+      </a>
 
-<div id="app">
+      <div class="topbar-center">
+        <span class="live-dot"></span>
+        <span id="connection-label">Connecting to Luma engine</span>
+      </div>
 
+      <div class="topbar-actions">
+        <button class="icon-button" id="refresh-folder" type="button" title="Refresh input folder" aria-label="Refresh input folder">
+          <svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9A7 7 0 0 1 18 6.8L20 12M4 12l2 5.2A7 7 0 0 0 18.4 15"/></svg>
+        </button>
+        <button class="avatar-button" type="button" title="Luma workspace">L</button>
+      </div>
+    </header>
 
-    <!-- SIDEBAR -->
+    <main class="main-content">
+      <section class="intro-row">
+        <div>
+          <p class="eyebrow"><span class="eyebrow-line"></span> CREATIVE WORKSPACE <span class="eyebrow-index">01 / EDIT</span></p>
+          <h1>Make the moment <span>yours.</span></h1>
+          <p class="intro-copy">Shape the light. Find your look. Make every frame feel intentional.</p>
+        </div>
+        <div class="session-chip">
+          <span class="session-chip-icon">
+            <svg viewBox="0 0 24 24"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="m4.5 7.7 7.5 4.4 7.5-4.4M12 12v8.5"/></svg>
+          </span>
+          <span><strong id="photo-count-chip">0 photos</strong><small>IN THIS SESSION</small></span>
+        </div>
+      </section>
 
-    <aside id="sidebar">
-
-        <div id="brand">
-            LUMA
+      <section class="toolbar panel" aria-label="Photo and preset controls">
+        <div class="toolbar-group preset-controls">
+          <div class="toolbar-label"><span class="mini-spark">✳</span> YOUR LOOK</div>
+          <label class="select-wrap">
+            <span class="sr-only">Preset category</span>
+            <select id="category-select" disabled>
+              <option>Loading categories…</option>
+            </select>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg>
+          </label>
+          <span class="select-connector" aria-hidden="true"></span>
+          <label class="select-wrap preset-select-wrap">
+            <span class="sr-only">Preset</span>
+            <select id="preset-select" disabled>
+              <option>Loading presets…</option>
+            </select>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg>
+          </label>
         </div>
 
+        <div class="toolbar-separator"></div>
 
-        <button class="nav-button active">
-            Home
-        </button>
+        <div class="toolbar-group file-controls">
+          <div class="toolbar-label">YOUR PHOTOS</div>
+          <button class="button button-secondary" id="choose-folder" type="button">
+            <svg viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 10h17"/></svg>
+            <span>Input folder</span>
+          </button>
+          <button class="button button-primary" id="add-photos" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Add photos</span>
+          </button>
+        </div>
+      </section>
 
-        <button class="nav-button">
-            Presets
-        </button>
-
-        <button class="nav-button">
-            Settings
-        </button>
-
-        <button class="nav-button">
-            About
-        </button>
-
-    </aside>
-
-
-    <!-- MAIN -->
-
-    <main id="main">
-
-
-        <!-- TOP -->
-
-        <header id="topbar">
-
-            <div>
-
-                <h1>
-                    Photo workspace
-                </h1>
-
-                <p>
-                    Browse your input folder and edit any photo with Luma presets
-                </p>
-
+      <section class="workspace-grid">
+        <div class="editor-column">
+          <section class="preview-panel panel">
+            <div class="panel-heading preview-heading">
+              <div>
+                <p class="eyebrow-small">LIVE COMPARISON</p>
+                <h2>Before <span class="heading-slash">/</span> after</h2>
+              </div>
+              <div class="preview-heading-right">
+                <span class="render-status" id="preview-status"><span class="status-dot"></span> Waiting for a photo</span>
+                <span class="preview-badge"><span class="badge-spark">✳</span> PREVIEW</span>
+              </div>
             </div>
 
-
-            <button
-                id="clear-button"
-                class="secondary-button"
-            >
-                Clear batch
-            </button>
-
-        </header>
-
-
-        <!-- WORKSPACE -->
-
-        <section id="workspace">
-
-
-            <!-- LEFT -->
-
-            <section id="left-column">
-
-
-                <!-- INPUT FOLDER -->
-
-                <div class="panel input-panel">
-
-                    <div class="panel-heading">
-                        INPUT FOLDER
-                    </div>
-
-                    <div
-                        id="input-folder-name"
-                        class="large-text"
-                    >
-                        Luma_Input
-                    </div>
-
-                    <div
-                        id="input-folder-path"
-                        class="secondary-text"
-                    >
-                    </div>
-
-                    <div
-                        id="folder-status"
-                        class="folder-status"
-                    >
-                        ● Watching folder
-                    </div>
-
-                    <button
-                        id="change-folder-button"
-                        class="secondary-button"
-                    >
-                        Change folder
-                    </button>
-
+            <div class="comparison-stage" id="comparison-stage">
+              <div class="comparison-empty" id="comparison-empty">
+                <div class="empty-orbit orbit-one"></div>
+                <div class="empty-orbit orbit-two"></div>
+                <div class="empty-icon">
+                  <svg viewBox="0 0 48 48"><rect x="6" y="8" width="36" height="32" rx="5"/><circle cx="17" cy="19" r="3.5"/><path d="m8 35 11-10 7 6 5-5 9 9"/></svg>
                 </div>
-
-
-                <!-- PREVIEW -->
-
-                <div
-                    id="comparison-panel"
-                    class="panel"
-                >
-
-                    <div class="panel-header">
-
-                        <span>
-                            BEFORE / AFTER
-                        </span>
-
-                        <span>
-                            Drag divider
-                        </span>
-
-                    </div>
-
-
-                    <div id="preview">
-
-                        <div
-                            id="preview-empty"
-                            class="preview-empty"
-                        >
-                            Select a photo to preview it
-                        </div>
-
-
-                        <img
-                            id="before-image"
-                            class="preview-image"
-                            draggable="false"
-                        >
-
-                        <div
-                            id="after-container"
-                        >
-
-                            <img
-                                id="after-image"
-                                class="preview-image"
-                                draggable="false"
-                            >
-
-                        </div>
-
-
-                        <div
-                            id="preview-divider"
-                        >
-
-                            <div id="preview-handle">
-                                ↔
-                            </div>
-
-                        </div>
-
-
-                        <div
-                            id="before-label"
-                            class="preview-label"
-                        >
-                            BEFORE
-                        </div>
-
-                        <div
-                            id="after-label"
-                            class="preview-label"
-                        >
-                            AFTER
-                        </div>
-
-                    </div>
-
-                </div>
-
-
-                <!-- CAROUSEL -->
-
-                <div id="carousel-section">
-
-                    <div id="carousel-heading">
-
-                        <span>
-                            PHOTOS
-                        </span>
-
-                        <span>
-                            Scroll, drag, or use the arrows
-                        </span>
-
-                    </div>
-
-
-                    <div id="carousel-wrapper">
-
-                        <button
-                            id="carousel-left"
-                            class="carousel-arrow"
-                        >
-                            ‹
-                        </button>
-
-
-                        <div
-                            id="carousel"
-                            tabindex="0"
-                        >
-
-                            <div id="carousel-track">
-                            </div>
-
-                        </div>
-
-
-                        <button
-                            id="carousel-right"
-                            class="carousel-arrow"
-                        >
-                            ›
-                        </button>
-
-                    </div>
-
-
-                    <div id="carousel-footer">
-
-                        <span id="selected-photo-label">
-                            No photos
-                        </span>
-
-                        <span>
-                            Blue = selected • Grey = hover
-                        </span>
-
-                    </div>
-
-                </div>
-
-            </section>
-
-
-            <!-- RIGHT -->
-
-            <aside id="preset-panel" class="panel">
-
-                <div class="panel-heading">
-                    PRESETS
-                </div>
-
-                <h2>
-                    Choose your look
-                </h2>
-
-
-                <select id="category-select">
-                </select>
-
-
-                <div id="preset-list">
-                </div>
-
-            </aside>
-
-
-        </section>
-
-
-        <!-- BOTTOM -->
-
-        <footer id="status-bar">
-
-            <span id="photo-count">
-                0 photos
-            </span>
-
-            <span id="status">
-                Ready
-            </span>
-
-
-            <div id="progress-container">
-
-                <div id="progress">
-                </div>
-
+                <p class="empty-title">Your next favourite edit starts here.</p>
+                <p class="empty-copy">Choose an input folder or add a few photos to begin.</p>
+                <button class="button button-primary" id="empty-add-photos" type="button">
+                  <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                  Add photos
+                </button>
+              </div>
+
+              <img class="comparison-image before-image" id="before-image" alt="Original photograph" draggable="false">
+              <div class="after-clip" id="after-clip">
+                <img class="comparison-image after-image" id="after-image" alt="Edited photograph" draggable="false">
+              </div>
+
+              <div class="comparison-label before-label" id="before-label">ORIGINAL <span>↙</span></div>
+              <div class="comparison-label after-label" id="after-label"><span>↗</span> EDITED</div>
+
+              <div class="comparison-divider" id="comparison-divider" aria-hidden="true">
+                <span class="divider-knob">
+                  <svg viewBox="0 0 24 24"><path d="m9 7-5 5 5 5M15 7l5 5-5 5"/></svg>
+                </span>
+              </div>
+              <input id="comparison-range" class="comparison-range" type="range" min="0" max="100" value="50" aria-label="Compare original and edited image">
+              <div class="preview-bottom-left" id="preview-filename">NO IMAGE SELECTED</div>
+              <div class="preview-bottom-right"><span class="tiny-live-dot"></span> LIVE PREVIEW</div>
             </div>
 
+            <div class="preview-footer">
+              <div class="preview-hint"><span class="hint-icon">↔</span> Drag the handle to compare your edit</div>
+              <div class="preview-tools">
+                <span class="format-pill" id="file-format">—</span>
+                <span class="footer-divider"></span>
+                <span id="preview-index">FRAME — / —</span>
+              </div>
+            </div>
+          </section>
 
-            <button
-                id="open-output-button"
-                class="secondary-button"
-            >
-                OPEN OUTPUT
+          <section class="filmstrip-section">
+            <div class="filmstrip-heading">
+              <div class="filmstrip-title-group">
+                <span class="filmstrip-icon">
+                  <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>
+                </span>
+                <div>
+                  <h2>Your filmstrip</h2>
+                  <p id="filmstrip-subtitle">Your input folder, all in one place</p>
+                </div>
+              </div>
+              <div class="filmstrip-actions">
+                <span id="filmstrip-count">0 FRAMES</span>
+                <button class="text-button" id="clear-photos" type="button">Clear selection <span>×</span></button>
+              </div>
+            </div>
+            <div class="filmstrip-wrap">
+              <button class="carousel-arrow carousel-prev" id="carousel-prev" type="button" aria-label="Scroll photos left">
+                <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+              </button>
+              <div class="filmstrip" id="filmstrip" tabindex="0" aria-label="Input photos carousel">
+                <div class="filmstrip-empty">Your imported images will appear here.</div>
+              </div>
+              <button class="carousel-arrow carousel-next" id="carousel-next" type="button" aria-label="Scroll photos right">
+                <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <aside class="details-column">
+          <section class="detail-card panel">
+            <div class="detail-card-header">
+              <p class="eyebrow-small">CURRENT LOOK</p>
+              <span class="look-status"><span></span> ACTIVE</span>
+            </div>
+            <div class="look-art" role="img" aria-label="Mountain lake at dusk">
+              <span class="look-art-caption">LANDSCAPE · GOLDEN HOUR</span>
+            </div>
+            <div class="look-info">
+              <span class="look-category" id="active-category">PRESET COLLECTION</span>
+              <h3 id="active-preset-name">Choose your look</h3>
+              <p id="active-preset-description">Select a preset to see its effect on your photograph.</p>
+            </div>
+            <div class="detail-divider"></div>
+            <div class="metadata-list">
+              <div><span>Input folder</span><strong id="folder-name">Not selected</strong></div>
+              <div><span>Selected image</span><strong id="selected-image-name">—</strong></div>
+              <div><span>Images loaded</span><strong id="loaded-image-count">0</strong></div>
+            </div>
+          </section>
+
+          <section class="export-card panel">
+            <div class="export-topline">
+              <span class="export-icon">
+                <svg viewBox="0 0 24 24"><path d="M12 16V3M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+              </span>
+              <span class="export-kicker">READY WHEN YOU ARE</span>
+            </div>
+            <h3>Make it official.</h3>
+            <p>Apply this look to every photo in your selection and save the finished set.</p>
+            <div class="export-progress" id="export-progress-wrap" hidden>
+              <div class="progress-label"><span id="export-status">Preparing export…</span><strong id="export-percent">0%</strong></div>
+              <div class="progress-track"><span id="export-progress-bar"></span></div>
+            </div>
+            <button class="button button-export" id="export-photos" type="button" disabled>
+              <span>Export photos</span>
+              <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
             </button>
-
-
-            <button
-                id="add-photos-button"
-                class="secondary-button"
-            >
-                ADD PHOTOS
+            <button class="open-output-button" id="open-output" type="button">
+              Open export folder <svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>
             </button>
+          </section>
 
+          <div class="tip-card">
+            <span class="tip-icon">✳</span>
+            <p><strong>A little tip</strong><br>Subtle edits often make the strongest photographs. Use the comparison slider to keep your look balanced.</p>
+          </div>
+        </aside>
+      </section>
 
-            <button
-                id="edit-button"
-                class="primary-button"
-            >
-                EDIT PHOTOS
-            </button>
-
-        </footer>
-
+      <footer class="app-footer">
+        <span><span class="footer-brand-dot"></span> LUMA PHOTO STUDIO <span class="footer-version">V2.0</span></span>
+        <span id="footer-message">Your images stay on your machine.</span>
+        <span class="footer-shortcut">MADE FOR THE MOMENT <span>✳</span></span>
+      </footer>
     </main>
 
-</div>
-
-
-<script src="js/app.js"></script>
-
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  </div>
 </body>
-
 </html>
-

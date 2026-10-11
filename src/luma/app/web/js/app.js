@@ -1,1430 +1,596 @@
-let photos = [];
-let selectedIndex = 0;
+(() => {
+  "use strict";
 
-let categories = [];
-let presets = {};
-let selectedPreset = null;
+  const $ = (selector) => document.querySelector(selector);
+  const elements = {
+    connection: $("#connection-label"),
+    category: $("#category-select"),
+    preset: $("#preset-select"),
+    chooseFolder: $("#choose-folder"),
+    addPhotos: $("#add-photos"),
+    emptyAddPhotos: $("#empty-add-photos"),
+    refreshFolder: $("#refresh-folder"),
+    clearPhotos: $("#clear-photos"),
+    photoCountChip: $("#photo-count-chip"),
+    previewStatus: $("#preview-status"),
+    stage: $("#comparison-stage"),
+    emptyState: $("#comparison-empty"),
+    beforeImage: $("#before-image"),
+    afterImage: $("#after-image"),
+    afterClip: $("#after-clip"),
+    divider: $("#comparison-divider"),
+    range: $("#comparison-range"),
+    beforeLabel: $("#before-label"),
+    afterLabel: $("#after-label"),
+    filename: $("#preview-filename"),
+    fileFormat: $("#file-format"),
+    previewIndex: $("#preview-index"),
+    filmstrip: $("#filmstrip"),
+    filmstripSubtitle: $("#filmstrip-subtitle"),
+    filmstripCount: $("#filmstrip-count"),
+    carouselPrev: $("#carousel-prev"),
+    carouselNext: $("#carousel-next"),
+    activeCategory: $("#active-category"),
+    activePresetName: $("#active-preset-name"),
+    activePresetDescription: $("#active-preset-description"),
+    folderName: $("#folder-name"),
+    selectedImageName: $("#selected-image-name"),
+    loadedImageCount: $("#loaded-image-count"),
+    exportButton: $("#export-photos"),
+    exportProgressWrap: $("#export-progress-wrap"),
+    exportStatus: $("#export-status"),
+    exportPercent: $("#export-percent"),
+    exportProgressBar: $("#export-progress-bar"),
+    openOutput: $("#open-output"),
+    footerMessage: $("#footer-message"),
+    toastRegion: $("#toast-region"),
+  };
 
-let carouselPosition = 0;
-let carouselTarget = 0;
+  const state = {
+    inputFolder: { name: "Not selected", path: "" },
+    photos: [],
+    selectedIndex: 0,
+    categories: [],
+    presets: {},
+    selectedPreset: null,
+    processing: false,
+    lastPreview: null,
+  };
 
-let carouselDragging = false;
-let carouselDragStartX = 0;
-let carouselDragStartPosition = 0;
+  let previewRequestId = 0;
+  let statusPollHandle = null;
 
-let hoveredIndex = null;
+  const api = () => {
+    if (!window.pywebview || !window.pywebview.api) {
+      throw new Error("Luma's desktop bridge is not ready yet.");
+    }
+    return window.pywebview.api;
+  };
 
-let previewDragging = false;
-let previewDivider = 0.5;
+  async function callApi(method, ...args) {
+    const bridge = api();
+    if (typeof bridge[method] !== "function") {
+      throw new Error(`The Python bridge does not provide "${method}".`);
+    }
+    return bridge[method](...args);
+  }
 
-let lastFolderSignature = "";
-let processing = false;
+  function displayName(value) {
+    return String(value || "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
 
+  function showToast(message, isError = false) {
+    const toast = document.createElement("div");
+    toast.className = `toast${isError ? " is-error" : ""}`;
+    toast.textContent = message;
+    elements.toastRegion.appendChild(toast);
+    window.setTimeout(() => toast.remove(), 3600);
+  }
 
-/* ---------------------------------------------------------
-   DOM
---------------------------------------------------------- */
+  function setConnection(connected, message) {
+    elements.connection.textContent = message;
+    const dot = document.querySelector(".topbar-center .live-dot");
+    if (dot) {
+      dot.style.background = connected ? "var(--accent)" : "var(--danger)";
+      dot.style.boxShadow = connected ? "0 0 12px rgba(213,255,95,.35)" : "none";
+    }
+  }
 
-const carousel =
-    document.getElementById("carousel");
+  function setPreviewStatus(message, mode = "") {
+    elements.previewStatus.classList.remove("is-rendering", "is-ready");
+    if (mode) elements.previewStatus.classList.add(mode);
+    elements.previewStatus.innerHTML = "";
+    const dot = document.createElement("span");
+    dot.className = "status-dot";
+    const label = document.createElement("span");
+    label.textContent = message;
+    elements.previewStatus.append(dot, label);
+  }
 
-const carouselTrack =
-    document.getElementById("carousel-track");
+  function selectedPhoto() {
+    return state.photos[state.selectedIndex] || null;
+  }
 
-const preview =
-    document.getElementById("preview");
+  function currentPreset() {
+    for (const category of state.categories) {
+      const match = (state.presets[category] || []).find(
+        (preset) => preset.name === state.selectedPreset
+      );
+      if (match) return match;
+    }
+    return null;
+  }
 
-const beforeImage =
-    document.getElementById("before-image");
+  function inferSelectedCategory() {
+    const matchingCategory = state.categories.find((category) =>
+      (state.presets[category] || []).some(
+        (preset) => preset.name === state.selectedPreset
+      )
+    );
+    return matchingCategory || state.categories[0] || "";
+  }
 
-const afterImage =
-    document.getElementById("after-image");
+  function setSelectOptions(select, items, valueOf, labelOf, selectedValue) {
+    select.replaceChildren();
+    for (const item of items) {
+      const option = document.createElement("option");
+      option.value = valueOf(item);
+      option.textContent = labelOf(item);
+      select.appendChild(option);
+    }
+    if (selectedValue != null && [...select.options].some((option) => option.value === selectedValue)) {
+      select.value = selectedValue;
+    }
+    select.disabled = items.length === 0 || state.processing;
+  }
 
-const afterContainer =
-    document.getElementById("after-container");
+  function renderPresetControls() {
+    setSelectOptions(
+      elements.category,
+      state.categories,
+      (category) => category,
+      (category) => displayName(category),
+      inferSelectedCategory()
+    );
 
-const divider =
-    document.getElementById("preview-divider");
+    const category = elements.category.value;
+    const categoryPresets = state.presets[category] || [];
+    setSelectOptions(
+      elements.preset,
+      categoryPresets,
+      (preset) => preset.name,
+      (preset) => preset.display_name || displayName(preset.name),
+      state.selectedPreset
+    );
 
-const previewEmpty =
-    document.getElementById("preview-empty");
+    const active = currentPreset();
+    elements.activeCategory.textContent = active
+      ? `${displayName(active.category).toUpperCase()} COLLECTION`
+      : "PRESET COLLECTION";
+    elements.activePresetName.textContent = active
+      ? (active.display_name || displayName(active.name))
+      : "Choose your look";
+    elements.activePresetDescription.textContent = active
+      ? "This look is ready to preview. Compare the original and edited image using the slider."
+      : "Select a preset to see its effect on your photograph.";
+  }
 
-const categorySelect =
-    document.getElementById("category-select");
+  function renderPhotoDetails() {
+    const photo = selectedPhoto();
+    const count = state.photos.length;
+    elements.photoCountChip.textContent = `${count} ${count === 1 ? "photo" : "photos"}`;
+    elements.filmstripCount.textContent = `${String(count).padStart(2, "0")} FRAMES`;
+    elements.loadedImageCount.textContent = String(count);
+    elements.folderName.textContent = state.inputFolder?.name || "Not selected";
+    elements.selectedImageName.textContent = photo?.name || "—";
+    elements.filename.textContent = photo ? photo.name.toUpperCase() : "NO IMAGE SELECTED";
+    elements.fileFormat.textContent = photo?.name?.includes(".")
+      ? photo.name.split(".").pop().toUpperCase()
+      : "—";
+    elements.previewIndex.textContent = photo
+      ? `FRAME ${String(state.selectedIndex + 1).padStart(2, "0")} / ${String(count).padStart(2, "0")}`
+      : "FRAME — / —";
+    elements.filmstripSubtitle.textContent = state.inputFolder?.path
+      ? state.inputFolder.path
+      : "Your input folder, all in one place";
+    elements.exportButton.disabled = count === 0 || !state.selectedPreset || state.processing;
+    elements.clearPhotos.disabled = count === 0 || state.processing;
+  }
 
-const presetList =
-    document.getElementById("preset-list");
+  function renderFilmstrip() {
+    elements.filmstrip.replaceChildren();
+    if (!state.photos.length) {
+      const empty = document.createElement("div");
+      empty.className = "filmstrip-empty";
+      empty.textContent = "Your imported images will appear here.";
+      elements.filmstrip.appendChild(empty);
+      return;
+    }
 
-const statusElement =
-    document.getElementById("status");
+    state.photos.forEach((photo, index) => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = `photo-card${index === state.selectedIndex ? " is-selected" : ""}`;
+      card.setAttribute("aria-label", `Select photo ${index + 1}: ${photo.name}`);
+      card.setAttribute("aria-pressed", index === state.selectedIndex ? "true" : "false");
 
-const progress =
-    document.getElementById("progress");
+      const image = document.createElement("img");
+      image.className = "photo-thumb";
+      image.src = photo.uri;
+      image.alt = "";
+      image.draggable = false;
 
+      const selectedMark = document.createElement("span");
+      selectedMark.className = "photo-selected-mark";
+      selectedMark.textContent = "✓";
 
-/* ---------------------------------------------------------
-   Startup
---------------------------------------------------------- */
+      const bottom = document.createElement("span");
+      bottom.className = "photo-card-bottom";
+      const number = document.createElement("span");
+      number.className = "photo-number";
+      number.textContent = String(index + 1).padStart(2, "0");
+      const name = document.createElement("span");
+      name.className = "photo-name";
+      name.textContent = photo.name;
+      bottom.append(number, name);
+      card.append(image, selectedMark, bottom);
+      card.addEventListener("click", () => choosePhoto(index));
+      elements.filmstrip.appendChild(card);
+    });
 
-window.addEventListener("pywebviewready", async () => {
+    const selected = elements.filmstrip.querySelector(".photo-card.is-selected");
+    if (selected) selected.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }
+
+  function setComparisonPosition(value) {
+    const clamped = Math.max(0, Math.min(100, Number(value) || 0));
+    elements.afterClip.style.clipPath = `inset(0 0 0 ${clamped}%)`;
+    elements.divider.style.left = `${clamped}%`;
+    elements.range.value = String(clamped);
+  }
+
+  function resetComparison() {
+    state.lastPreview = null;
+    elements.beforeImage.removeAttribute("src");
+    elements.afterImage.removeAttribute("src");
+    elements.beforeImage.style.display = "none";
+    elements.afterClip.style.display = "none";
+    elements.divider.style.display = "none";
+    elements.range.style.display = "none";
+    elements.beforeLabel.style.display = "none";
+    elements.afterLabel.style.display = "none";
+    elements.emptyState.classList.remove("is-hidden");
+    setPreviewStatus(state.photos.length ? "Preparing preview" : "Waiting for a photo");
+  }
+
+  async function renderPreview() {
+    const photo = selectedPhoto();
+    const preset = currentPreset();
+    const requestId = ++previewRequestId;
+
+    if (!photo || !preset) {
+      resetComparison();
+      return;
+    }
+
+    elements.emptyState.classList.add("is-hidden");
+    elements.beforeImage.style.display = "block";
+    elements.afterClip.style.display = "block";
+    elements.divider.style.display = "block";
+    elements.range.style.display = "block";
+    elements.beforeLabel.style.display = "flex";
+    elements.afterLabel.style.display = "flex";
+
+    elements.beforeImage.src = photo.uri;
+    elements.afterImage.removeAttribute("src");
+    setComparisonPosition(elements.range.value || 50);
+    setPreviewStatus("Rendering selected look", "is-rendering");
 
     try {
-
-        const state =
-            await pywebview.api.get_initial_state();
-
-        applyInitialState(state);
-
-        startFolderWatcher();
-
-        startProcessingWatcher();
-
+      const result = await callApi("generate_preview");
+      if (requestId !== previewRequestId) return;
+      if (!result || !result.success) {
+        setPreviewStatus("Preview unavailable");
+        showToast(result?.error || "Could not generate the preview.", true);
+        return;
+      }
+      elements.beforeImage.src = result.before || photo.uri;
+      elements.afterImage.src = result.after;
+      state.lastPreview = result;
+      setPreviewStatus("Preview ready", "is-ready");
     } catch (error) {
-
-        console.error(error);
-
-        setStatus(
-            "Failed to initialise Luma",
-            "error"
-        );
+      if (requestId !== previewRequestId) return;
+      setPreviewStatus("Preview unavailable");
+      showToast(error.message || "Could not generate the preview.", true);
     }
+  }
 
-});
-
-
-/* ---------------------------------------------------------
-   Initial state
---------------------------------------------------------- */
-
-function applyInitialState(state) {
-
-    updateFolder(
-        state.input_folder
-    );
-
-    categories =
-        state.categories || [];
-
-    presets =
-        state.presets || {};
-
-    selectedPreset =
-        state.selected_preset;
-
-    photos =
-        state.photos || [];
-
-    selectedIndex =
-        state.selected_index || 0;
-
-    populateCategories();
-
-    renderPresets();
-
-    renderCarousel();
-
-    updatePhotoInformation();
-
-    if (photos.length > 0) {
-
-        selectPhoto(
-            selectedIndex,
-            false
-        );
-
+  async function choosePhoto(index) {
+    if (state.processing || index < 0 || index >= state.photos.length) return;
+    state.selectedIndex = index;
+    try {
+      const result = await callApi("select_photo", index);
+      if (result?.photos) state.photos = result.photos;
+      if (Number.isInteger(result?.selected_index)) state.selectedIndex = result.selected_index;
+      renderFilmstrip();
+      renderPhotoDetails();
+      await renderPreview();
+    } catch (error) {
+      showToast(error.message || "Could not select that photo.", true);
     }
-}
+  }
 
-
-/* ---------------------------------------------------------
-   Folder
---------------------------------------------------------- */
-
-function updateFolder(folder) {
-
-    if (!folder) {
-        return;
+  async function changePreset(presetName) {
+    if (!presetName || state.processing) return;
+    try {
+      const result = await callApi("select_preset", presetName);
+      if (!result?.success) throw new Error(result?.error || "Could not select preset.");
+      state.selectedPreset = result.preset?.name || presetName;
+      renderPresetControls();
+      renderPhotoDetails();
+      await renderPreview();
+    } catch (error) {
+      showToast(error.message || "Could not select that preset.", true);
     }
+  }
 
-    document.getElementById(
-        "input-folder-name"
-    ).textContent = folder.name;
-
-    document.getElementById(
-        "input-folder-path"
-    ).textContent = folder.path;
-}
-
-
-document
-    .getElementById("change-folder-button")
-    .addEventListener(
-        "click",
-        async () => {
-
-            const result =
-                await pywebview.api.select_folder();
-
-            if (!result) {
-                return;
-            }
-
-            updateFolder(result);
-
-            photos =
-                result.photos || [];
-
-            selectedIndex = 0;
-
-            carouselPosition = 0;
-            carouselTarget = 0;
-
-            renderCarousel();
-
-            updatePhotoInformation();
-
-            if (photos.length > 0) {
-                await selectPhoto(
-                    0,
-                    false
-                );
-            } else {
-                clearPreview();
-            }
-
-        }
-    );
-
-
-/* ---------------------------------------------------------
-   Add photos
---------------------------------------------------------- */
-
-document
-    .getElementById("add-photos-button")
-    .addEventListener(
-        "click",
-        async () => {
-
-            const state =
-                await pywebview.api.select_images();
-
-            applyPhotoState(state);
-
-            if (photos.length > 0) {
-                await generatePreview();
-            }
-
-        }
-    );
-
-
-/* ---------------------------------------------------------
-   Photo state
---------------------------------------------------------- */
-
-function applyPhotoState(state) {
-
-    if (!state) {
-        return;
+  async function handleCategoryChange() {
+    const category = elements.category.value;
+    const options = state.presets[category] || [];
+    if (!options.length) {
+      state.selectedPreset = null;
+      renderPresetControls();
+      renderPhotoDetails();
+      resetComparison();
+      return;
     }
-
-    photos =
-        state.photos || [];
-
-    selectedIndex =
-        state.selected_index || 0;
-
-    if (
-        selectedIndex >= photos.length
-    ) {
-        selectedIndex = 0;
-    }
-
-    carouselPosition =
-        selectedIndex;
-
-    carouselTarget =
-        selectedIndex;
-
-    renderCarousel();
-
-    updatePhotoInformation();
-}
-
-
-function updatePhotoInformation() {
-
-    const count =
-        photos.length;
-
-    document.getElementById(
-        "photo-count"
-    ).textContent =
-        `${count} photo${count === 1 ? "" : "s"}`;
-
-    if (!photos.length) {
-
-        document.getElementById(
-            "selected-photo-label"
-        ).textContent =
-            "No photos";
-
-        return;
-    }
-
-    document.getElementById(
-        "selected-photo-label"
-    ).textContent =
-        `Photo ${selectedIndex + 1} of ${photos.length} • ${photos[selectedIndex].name}`;
-}
-
-
-/* ---------------------------------------------------------
-   Clear
---------------------------------------------------------- */
-
-document
-    .getElementById("clear-button")
-    .addEventListener(
-        "click",
-        async () => {
-
-            if (processing) {
-                return;
-            }
-
-            const state =
-                await pywebview.api.clear_photos();
-
-            applyPhotoState(state);
-
-            clearPreview();
-
-            setStatus(
-                "Ready — folder is still being watched"
-            );
-        }
-    );
-
-
-/* ---------------------------------------------------------
-   Carousel
---------------------------------------------------------- */
-
-function renderCarousel() {
-
-    carouselTrack.innerHTML = "";
-
-    if (!photos.length) {
-        return;
-    }
-
-    photos.forEach(
-        (photo, index) => {
-
-            const item =
-                document.createElement("div");
-
-            item.className =
-                "carousel-item";
-
-            item.dataset.index =
-                index;
-
-            const image =
-                document.createElement("img");
-
-            image.src =
-                photo.uri;
-
-            image.draggable = false;
-
-            item.appendChild(image);
-
-            item.addEventListener(
-                "click",
-                () => {
-                    selectPhoto(index, true);
-                }
-            );
-
-            item.addEventListener(
-                "mouseenter",
-                () => {
-                    hoveredIndex = index;
-                    updateCarouselVisuals();
-                }
-            );
-
-            item.addEventListener(
-                "mouseleave",
-                () => {
-                    hoveredIndex = null;
-                    updateCarouselVisuals();
-                }
-            );
-
-            carouselTrack.appendChild(item);
-        }
-    );
-
-    updateCarouselVisuals();
-}
-
-
-function updateCarouselVisuals() {
-
-    const items =
-        Array.from(
-            carouselTrack.children
-        );
-
-    const maxDistance = 4.5;
-
-    items.forEach(
-        (item, index) => {
-
-            const distance =
-                index - carouselPosition;
-
-            const absolute =
-                Math.abs(distance);
-
-            if (
-                absolute > maxDistance
-            ) {
-
-                item.style.opacity = "0";
-                item.style.pointerEvents =
-                    "none";
-
-                return;
-            }
-
-            const t =
-                Math.min(
-                    1,
-                    absolute / maxDistance
-                );
-
-            const smooth =
-                t * t * (3 - 2 * t);
-
-            const scale =
-                1 - 0.48 * smooth;
-
-            const opacity =
-                1 - 0.82 * smooth;
-
-            const x =
-                distance * 125;
-
-            item.style.transform =
-                `translateX(${x}px) translateY(-50%) scale(${scale})`;
-
-            item.style.opacity =
-                opacity;
-
-            item.style.pointerEvents =
-                opacity > 0.05
-                    ? "auto"
-                    : "none";
-
-            item.classList.toggle(
-                "selected",
-                index === selectedIndex
-            );
-
-            item.classList.toggle(
-                "hovered",
-                index === hoveredIndex
-            );
-        }
-    );
-
-}
-
-
-function moveCarousel(direction) {
-
-    if (!photos.length) {
-        return;
-    }
-
-    let destination =
-        Math.round(carouselTarget)
-        + direction;
-
-    destination =
-        Math.max(
-            0,
-            Math.min(
-                photos.length - 1,
-                destination
-            )
-        );
-
-    selectPhoto(
-        destination,
-        true
-    );
-}
-
-
-document
-    .getElementById("carousel-left")
-    .addEventListener(
-        "click",
-        () => moveCarousel(-1)
-    );
-
-
-document
-    .getElementById("carousel-right")
-    .addEventListener(
-        "click",
-        () => moveCarousel(1)
-    );
-
-
-/* ---------------------------------------------------------
-   Carousel animation
---------------------------------------------------------- */
-
-function animateCarousel() {
-
-    const difference =
-        carouselTarget - carouselPosition;
-
-    if (Math.abs(difference) < 0.01) {
-
-        carouselPosition =
-            carouselTarget;
-
-        updateCarouselVisuals();
-
-        return;
-    }
-
-    carouselPosition +=
-        difference * 0.18;
-
-    updateCarouselVisuals();
-
-    requestAnimationFrame(
-        animateCarousel
-    );
-}
-
-
-/* ---------------------------------------------------------
-   Select photo
---------------------------------------------------------- */
-
-async function selectPhoto(
-    index,
-    animate = true
-) {
-
-    if (!photos.length) {
-        return;
-    }
-
-    index =
-        Math.max(
-            0,
-            Math.min(
-                photos.length - 1,
-                index
-            )
-        );
-
-    selectedIndex = index;
-
-    carouselTarget = index;
-
-    if (!animate) {
-        carouselPosition = index;
+    await changePreset(options[0].name);
+  }
+
+  function hydrateFromInitialState(initial) {
+    state.inputFolder = initial.input_folder || state.inputFolder;
+    state.photos = Array.isArray(initial.photos) ? initial.photos : [];
+    state.selectedIndex = Number.isInteger(initial.selected_index) ? initial.selected_index : 0;
+    state.categories = Array.isArray(initial.categories) ? initial.categories : [];
+    state.presets = initial.presets || {};
+    state.selectedPreset = initial.selected_preset || null;
+
+    if (initial.processing) updateProcessingUI(initial.processing);
+    renderPresetControls();
+    renderFilmstrip();
+    renderPhotoDetails();
+
+    if (state.photos.length && state.selectedPreset) {
+      renderPreview();
     } else {
-        requestAnimationFrame(
-            animateCarousel
-        );
+      resetComparison();
+    }
+  }
+
+  async function initialise() {
+    try {
+      setConnection(true, "Connected to Luma engine");
+      const initial = await callApi("get_initial_state");
+      hydrateFromInitialState(initial);
+      if (initial.input_folder?.path) {
+        elements.footerMessage.textContent = "Your images stay on your machine.";
+      }
+      showToast("Luma is ready. Choose a look and start editing.");
+      startStatusPolling();
+    } catch (error) {
+      setConnection(false, "Could not connect to Luma engine");
+      showToast(error.message || "Could not initialise Luma.", true);
+    }
+  }
+
+  async function chooseFolder() {
+    if (state.processing) return;
+    try {
+      const result = await callApi("select_folder");
+      if (!result) return;
+      state.inputFolder = { name: result.name, path: result.path };
+      state.photos = result.photos || [];
+      state.selectedIndex = 0;
+      renderFilmstrip();
+      renderPhotoDetails();
+      if (state.photos.length) {
+        await renderPreview();
+      } else {
+        resetComparison();
+        showToast("Folder selected. No supported images were found.");
+      }
+    } catch (error) {
+      showToast(error.message || "Could not select that folder.", true);
+    }
+  }
+
+  async function addPhotos() {
+    if (state.processing) return;
+    try {
+      const result = await callApi("select_images");
+      if (!result) return;
+      state.photos = result.photos || [];
+      state.selectedIndex = Number.isInteger(result.selected_index) ? result.selected_index : 0;
+      renderFilmstrip();
+      renderPhotoDetails();
+      if (state.photos.length) await renderPreview();
+    } catch (error) {
+      showToast(error.message || "Could not add photos.", true);
+    }
+  }
+
+  async function refreshFolder() {
+    if (state.processing) return;
+    try {
+      await callApi("sync_input_folder");
+      const initial = await callApi("get_initial_state");
+      hydrateFromInitialState(initial);
+      showToast("Input folder refreshed.");
+    } catch (error) {
+      showToast(error.message || "Could not refresh the input folder.", true);
+    }
+  }
+
+  async function clearPhotos() {
+    if (state.processing) return;
+    try {
+      const result = await callApi("clear_photos");
+      state.photos = result?.photos || [];
+      state.selectedIndex = result?.selected_index || 0;
+      renderFilmstrip();
+      renderPhotoDetails();
+      resetComparison();
+      showToast("Photo selection cleared.");
+    } catch (error) {
+      showToast(error.message || "Could not clear photos.", true);
+    }
+  }
+
+  function updateProcessingUI(status = {}) {
+    const isProcessing = Boolean(status.processing);
+    state.processing = isProcessing;
+
+    elements.exportButton.disabled = isProcessing || state.photos.length === 0 || !state.selectedPreset;
+    elements.exportButton.querySelector("span").textContent = isProcessing ? "Exporting photos…" : "Export photos";
+    elements.chooseFolder.disabled = isProcessing;
+    elements.addPhotos.disabled = isProcessing;
+    elements.refreshFolder.disabled = isProcessing;
+    elements.clearPhotos.disabled = isProcessing || state.photos.length === 0;
+    elements.category.disabled = isProcessing || state.categories.length === 0;
+    elements.preset.disabled = isProcessing || !currentPreset();
+
+    if (isProcessing || (status.total && status.progress != null && status.progress >= 1)) {
+      elements.exportProgressWrap.hidden = false;
+    } else if (!status.status || status.status === "Ready") {
+      elements.exportProgressWrap.hidden = true;
     }
 
-    updatePhotoInformation();
-
-    const state =
-        await pywebview.api.select_photo(
-            index
-        );
-
-    if (state) {
-        photos =
-            state.photos || photos;
+    const progress = Math.max(0, Math.min(1, Number(status.progress) || 0));
+    elements.exportProgressBar.style.width = `${Math.round(progress * 100)}%`;
+    elements.exportPercent.textContent = `${Math.round(progress * 100)}%`;
+    elements.exportStatus.textContent = status.status || (isProcessing ? "Exporting photos…" : "Ready");
+    if (!isProcessing && status.total && progress >= 1) {
+      elements.exportButton.querySelector("span").textContent = "Export complete";
     }
+  }
 
-    renderCarousel();
+  async function exportPhotos() {
+    if (state.processing || !state.photos.length || !state.selectedPreset) return;
+    try {
+      const result = await callApi("process_photos");
+      if (!result?.success) throw new Error(result?.error || "Could not start export.");
+      elements.exportProgressWrap.hidden = false;
+      elements.exportButton.querySelector("span").textContent = "Exporting photos…";
+      showToast("Export started. You can follow its progress here.");
+      startStatusPolling(true);
+    } catch (error) {
+      showToast(error.message || "Could not start export.", true);
+    }
+  }
 
-    await generatePreview();
-}
-
-
-/* ---------------------------------------------------------
-   Carousel wheel / trackpad
---------------------------------------------------------- */
-
-carousel.addEventListener(
-    "wheel",
-    event => {
-
-        if (!photos.length) {
-            return;
+  async function pollProcessingStatus() {
+    try {
+      const status = await callApi("get_processing_status");
+      if (!status) return;
+      const wasProcessing = state.processing;
+      updateProcessingUI(status);
+      if (wasProcessing && !status.processing) {
+        renderPhotoDetails();
+        if (status.failed > 0) {
+          showToast(`Export finished: ${status.successful} succeeded, ${status.failed} failed.`, true);
+        } else if (status.total) {
+          showToast(`Export complete — ${status.successful} ${status.successful === 1 ? "photo" : "photos"} saved.`);
         }
+      }
+    } catch (_) {
+      // A transient bridge hiccup shouldn't interrupt the UI.
+    }
+  }
 
+  function startStatusPolling(immediate = false) {
+    if (statusPollHandle) window.clearInterval(statusPollHandle);
+    if (immediate) pollProcessingStatus();
+    statusPollHandle = window.setInterval(pollProcessingStatus, 700);
+  }
+
+  async function openOutputFolder() {
+    try {
+      const result = await callApi("open_output_folder");
+      if (!result?.success) throw new Error(result?.error || "Could not open export folder.");
+      showToast("Opening export folder.");
+    } catch (error) {
+      showToast(error.message || "Could not open export folder.", true);
+    }
+  }
+
+  function bindEvents() {
+    elements.category.addEventListener("change", handleCategoryChange);
+    elements.preset.addEventListener("change", () => changePreset(elements.preset.value));
+    elements.chooseFolder.addEventListener("click", chooseFolder);
+    elements.addPhotos.addEventListener("click", addPhotos);
+    elements.emptyAddPhotos.addEventListener("click", addPhotos);
+    elements.refreshFolder.addEventListener("click", refreshFolder);
+    elements.clearPhotos.addEventListener("click", clearPhotos);
+    elements.exportButton.addEventListener("click", exportPhotos);
+    elements.openOutput.addEventListener("click", openOutputFolder);
+
+    elements.range.addEventListener("input", () => setComparisonPosition(elements.range.value));
+    elements.carouselPrev.addEventListener("click", () => elements.filmstrip.scrollBy({ left: -330, behavior: "smooth" }));
+    elements.carouselNext.addEventListener("click", () => elements.filmstrip.scrollBy({ left: 330, behavior: "smooth" }));
+
+    elements.filmstrip.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight") {
         event.preventDefault();
-
-        let movement;
-
-        if (
-            Math.abs(event.deltaX)
-            > Math.abs(event.deltaY)
-        ) {
-            movement =
-                event.deltaX / 300;
-        } else {
-            movement =
-                event.deltaY / 300;
-        }
-
-        carouselTarget =
-            Math.max(
-                0,
-                Math.min(
-                    photos.length - 1,
-                    carouselTarget + movement
-                )
-            );
-
-        requestAnimationFrame(
-            animateCarousel
-        );
-
-        const nearest =
-            Math.round(carouselTarget);
-
-        if (
-            nearest !== selectedIndex
-        ) {
-            selectPhoto(
-                nearest,
-                false
-            );
-        }
-
-    },
-    {
-        passive: false
-    }
-);
-
-
-/* ---------------------------------------------------------
-   Carousel dragging
---------------------------------------------------------- */
-
-carousel.addEventListener(
-    "pointerdown",
-    event => {
-
-        if (!photos.length) {
-            return;
-        }
-
-        carouselDragging = true;
-
-        carouselDragStartX =
-            event.clientX;
-
-        carouselDragStartPosition =
-            carouselPosition;
-
-        carousel.setPointerCapture(
-            event.pointerId
-        );
-    }
-);
-
-
-carousel.addEventListener(
-    "pointermove",
-    event => {
-
-        if (!carouselDragging) {
-            return;
-        }
-
-        const dx =
-            event.clientX
-            - carouselDragStartX;
-
-        const position =
-            carouselDragStartPosition
-            - dx / 125;
-
-        carouselPosition =
-            Math.max(
-                0,
-                Math.min(
-                    photos.length - 1,
-                    position
-                )
-            );
-
-        carouselTarget =
-            carouselPosition;
-
-        const nearest =
-            Math.round(
-                carouselPosition
-            );
-
-        if (
-            nearest !== selectedIndex
-        ) {
-
-            selectedIndex =
-                nearest;
-
-            updatePhotoInformation();
-        }
-
-        updateCarouselVisuals();
-    }
-);
-
-
-carousel.addEventListener(
-    "pointerup",
-    event => {
-
-        if (!carouselDragging) {
-            return;
-        }
-
-        carouselDragging = false;
-
-        try {
-            carousel.releasePointerCapture(
-                event.pointerId
-            );
-        } catch (_) {}
-
-        const nearest =
-            Math.round(
-                carouselPosition
-            );
-
-        selectPhoto(
-            nearest,
-            true
-        );
-    }
-);
-
-
-/* ---------------------------------------------------------
-   Keyboard
---------------------------------------------------------- */
-
-document.addEventListener(
-    "keydown",
-    event => {
-
-        if (
-            event.key === "ArrowLeft"
-        ) {
-
-            moveCarousel(-1);
-
-            event.preventDefault();
-
-        } else if (
-            event.key === "ArrowRight"
-        ) {
-
-            moveCarousel(1);
-
-            event.preventDefault();
-        }
-    }
-);
-
-
-/* ---------------------------------------------------------
-   Presets
---------------------------------------------------------- */
-
-function populateCategories() {
-
-    categorySelect.innerHTML = "";
-
-    categories.forEach(
-        category => {
-
-            const option =
-                document.createElement("option");
-
-            option.value =
-                category;
-
-            option.textContent =
-                displayName(category);
-
-            categorySelect.appendChild(
-                option
-            );
-        }
-    );
-
-    if (categories.length) {
-        categorySelect.value =
-            categories[0];
-    }
-}
-
-
-categorySelect.addEventListener(
-    "change",
-    () => {
-        renderPresets();
-    }
-);
-
-
-function renderPresets() {
-
-    presetList.innerHTML = "";
-
-    const category =
-        categorySelect.value;
-
-    const categoryPresets =
-        presets[category] || [];
-
-    categoryPresets.forEach(
-        preset => {
-
-            const card =
-                document.createElement(
-                    "div"
-                );
-
-            card.className =
-                "preset-card";
-
-            if (
-                preset.name ===
-                selectedPreset
-            ) {
-                card.classList.add(
-                    "selected"
-                );
-            }
-
-            const checkbox =
-                document.createElement(
-                    "input"
-                );
-
-            checkbox.type =
-                "checkbox";
-
-            checkbox.checked =
-                preset.name ===
-                selectedPreset;
-
-            const content =
-                document.createElement(
-                    "div"
-                );
-
-            const title =
-                document.createElement(
-                    "div"
-                );
-
-            title.textContent =
-                preset.display_name;
-
-            const description =
-                document.createElement(
-                    "div"
-                );
-
-            description.textContent =
-                `${displayName(preset.category)} preset`;
-
-            content.appendChild(title);
-            content.appendChild(description);
-
-            card.appendChild(
-                checkbox
-            );
-
-            card.appendChild(
-                content
-            );
-
-            card.addEventListener(
-                "click",
-                async event => {
-
-                    if (
-                        event.target ===
-                        checkbox
-                    ) {
-                        return;
-                    }
-
-                    await choosePreset(
-                        preset.name
-                    );
-                }
-            );
-
-            checkbox.addEventListener(
-                "change",
-                async () => {
-
-                    if (
-                        checkbox.checked
-                    ) {
-
-                        await choosePreset(
-                            preset.name
-                        );
-
-                    } else {
-
-                        checkbox.checked =
-                            true;
-                    }
-                }
-            );
-
-            presetList.appendChild(
-                card
-            );
-        }
-    );
-}
-
-
-async function choosePreset(
-    name
-) {
-
-    const result =
-        await pywebview.api.select_preset(
-            name
-        );
-
-    if (!result.success) {
-
-        setStatus(
-            result.error,
-            "error"
-        );
-
-        return;
-    }
-
-    selectedPreset =
-        name;
-
-    renderPresets();
-
-    await generatePreview();
-}
-
-
-/* ---------------------------------------------------------
-   Preview
---------------------------------------------------------- */
-
-async function generatePreview() {
-
-    if (!photos.length) {
-        clearPreview();
-        return;
-    }
-
-    if (!selectedPreset) {
-        return;
-    }
-
-    setStatus(
-        "Generating preview..."
-    );
-
-    const result =
-        await pywebview.api.generate_preview();
-
-    if (!result.success) {
-
-        setStatus(
-            result.error,
-            "error"
-        );
-
-        return;
-    }
-
-    beforeImage.src =
-        result.before;
-
-    afterImage.src =
-        result.after;
-
-    beforeImage.style.display =
-        "block";
-
-    afterImage.style.display =
-        "block";
-
-    afterContainer.style.display =
-        "block";
-
-    previewEmpty.style.display =
-        "none";
-
-    updatePreviewDivider();
-
-    setStatus(
-        "Ready"
-    );
-}
-
-
-function clearPreview() {
-
-    beforeImage.removeAttribute(
-        "src"
-    );
-
-    afterImage.removeAttribute(
-        "src"
-    );
-
-    beforeImage.style.display =
-        "none";
-
-    afterImage.style.display =
-        "none";
-
-    afterContainer.style.display =
-        "none";
-
-    previewEmpty.style.display =
-        "flex";
-}
-
-
-/* ---------------------------------------------------------
-   Before / after slider
---------------------------------------------------------- */
-
-function updatePreviewDivider() {
-
-    const width =
-        preview.clientWidth;
-
-    const x =
-        width * previewDivider;
-
-    afterContainer.style.width =
-        `${x}px`;
-
-    divider.style.left =
-        `${x}px`;
-}
-
-
-function setPreviewDivider(
-    clientX
-) {
-
-    const rect =
-        preview.getBoundingClientRect();
-
-    let percentage =
-        (clientX - rect.left)
-        / rect.width;
-
-    percentage =
-        Math.max(
-            0,
-            Math.min(
-                1,
-                percentage
-            )
-        );
-
-    previewDivider =
-        percentage;
-
-    updatePreviewDivider();
-}
-
-
-preview.addEventListener(
-    "pointerdown",
-    event => {
-
-        if (
-            beforeImage.style.display ===
-            "none"
-        ) {
-            return;
-        }
-
-        previewDragging = true;
-
-        preview.setPointerCapture(
-            event.pointerId
-        );
-
-        setPreviewDivider(
-            event.clientX
-        );
-    }
-);
-
-
-preview.addEventListener(
-    "pointermove",
-    event => {
-
-        if (!previewDragging) {
-            return;
-        }
-
-        setPreviewDivider(
-            event.clientX
-        );
-    }
-);
-
-
-preview.addEventListener(
-    "pointerup",
-    event => {
-
-        previewDragging = false;
-
-        try {
-            preview.releasePointerCapture(
-                event.pointerId
-            );
-        } catch (_) {}
-    }
-);
-
-
-window.addEventListener(
-    "resize",
-    updatePreviewDivider
-);
-
-
-/* ---------------------------------------------------------
-   Folder watcher
---------------------------------------------------------- */
-
-function startFolderWatcher() {
-
-    setInterval(
-        async () => {
-
-            if (processing) {
-                return;
-            }
-
-            try {
-
-                const folderImages =
-                    await pywebview.api.get_folder_images();
-
-                const signature =
-                    JSON.stringify(
-                        folderImages.map(
-                            photo => photo.path
-                        )
-                    );
-
-                if (
-                    signature !==
-                    lastFolderSignature
-                ) {
-
-                    lastFolderSignature =
-                        signature;
-
-                    const externalPhotos =
-                        photos.filter(
-                            photo => {
-
-                                return !photo.path.startsWith(
-                                    document
-                                        .getElementById(
-                                            "input-folder-path"
-                                        )
-                                        .textContent
-                                );
-                            }
-                        );
-
-                    photos =
-                        folderImages.concat(
-                            externalPhotos
-                        );
-
-                    if (
-                        selectedIndex >=
-                        photos.length
-                    ) {
-                        selectedIndex = 0;
-                    }
-
-                    renderCarousel();
-
-                    updatePhotoInformation();
-
-                }
-
-            } catch (error) {
-
-                console.error(
-                    "Folder watcher error:",
-                    error
-                );
-            }
-
-        },
-        750
-    );
-}
-
-
-/* ---------------------------------------------------------
-   Processing
---------------------------------------------------------- */
-
-document
-    .getElementById("edit-button")
-    .addEventListener(
-        "click",
-        async () => {
-
-            if (processing) {
-                return;
-            }
-
-            const result =
-                await pywebview.api.process_photos();
-
-            if (!result.success) {
-
-                setStatus(
-                    result.error,
-                    "error"
-                );
-
-                return;
-            }
-
-            processing = true;
-
-            document
-                .getElementById(
-                    "edit-button"
-                )
-                .disabled = true;
-
-            setStatus(
-                "Preparing photos..."
-            );
-        }
-    );
-
-
-function startProcessingWatcher() {
-
-    setInterval(
-        async () => {
-
-            try {
-
-                const state =
-                    await pywebview.api.get_processing_status();
-
-                if (
-                    !state
-                ) {
-                    return;
-                }
-
-                processing =
-                    state.processing;
-
-                progress.style.width =
-                    `${state.progress * 100}%`;
-
-                if (
-                    state.processing
-                ) {
-
-                    setStatus(
-                        state.status
-                    );
-
-                } else if (
-                    state.progress === 1
-                    && state.total > 0
-                ) {
-
-                    setStatus(
-                        state.status,
-                        state.failed > 0
-                            ? "error"
-                            : "success"
-                    );
-
-                    document
-                        .getElementById(
-                            "edit-button"
-                        )
-                        .disabled = false;
-                }
-
-            } catch (error) {
-
-                console.error(
-                    "Processing watcher error:",
-                    error
-                );
-            }
-
-        },
-        250
-    );
-}
-
-
-/* ---------------------------------------------------------
-   Output
---------------------------------------------------------- */
-
-document
-    .getElementById(
-        "open-output-button"
-    )
-    .addEventListener(
-        "click",
-        async () => {
-
-            const result =
-                await pywebview.api.open_output_folder();
-
-            if (
-                !result.success
-            ) {
-
-                setStatus(
-                    result.error,
-                    "error"
-                );
-            }
-        }
-    );
-
-
-/* ---------------------------------------------------------
-   Utility
---------------------------------------------------------- */
-
-function displayName(
-    value
-) {
-
-    return value
-        .replaceAll("-", " ")
-        .replaceAll("_", " ")
-        .replace(
-            /\b\w/g,
-            character =>
-                character.toUpperCase()
-        );
-}
-
-
-function setStatus(
-    message,
-    type = ""
-) {
-
-    statusElement.textContent =
-        message;
-
-    statusElement.className =
-        type;
-}
-
-
-/* ---------------------------------------------------------
-   Window drag/drop
---------------------------------------------------------- */
-
-document.addEventListener(
-    "dragover",
-    event => {
+        choosePhoto(Math.min(state.photos.length - 1, state.selectedIndex + 1));
+      } else if (event.key === "ArrowLeft") {
         event.preventDefault();
-    }
-);
+        choosePhoto(Math.max(0, state.selectedIndex - 1));
+      }
+    });
 
+    // PyWebView can expose native dropped paths on supported platforms.
+    elements.stage.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      elements.stage.classList.add("is-dragging");
+    });
+    elements.stage.addEventListener("dragleave", () => elements.stage.classList.remove("is-dragging"));
+    elements.stage.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      elements.stage.classList.remove("is-dragging");
+      const paths = [...(event.dataTransfer?.files || [])]
+        .map((file) => file.path)
+        .filter(Boolean);
+      if (!paths.length) {
+        showToast("Use “Add photos” or “Input folder” to import images.");
+        return;
+      }
+      try {
+        const result = await callApi("add_dropped_paths", paths);
+        state.photos = result?.photos || [];
+        state.selectedIndex = Number.isInteger(result?.selected_index) ? result.selected_index : 0;
+        renderFilmstrip();
+        renderPhotoDetails();
+        if (state.photos.length) await renderPreview();
+      } catch (error) {
+        showToast(error.message || "Could not import dropped files.", true);
+      }
+    });
+  }
 
-document.addEventListener(
-    "drop",
-    async event => {
+  bindEvents();
+  setComparisonPosition(50);
 
-        event.preventDefault();
-
-        const files =
-            Array.from(
-                event.dataTransfer.files
-            );
-
-        const paths =
-            files
-                .map(
-                    file => file.path
-                )
-                .filter(Boolean);
-
-        if (!paths.length) {
-            return;
-        }
-
-        const state =
-            await pywebview.api.add_dropped_paths(
-                paths
-            );
-
-        applyPhotoState(state);
-
-        if (photos.length) {
-            await generatePreview();
-        }
-    }
-);
+  if (window.pywebview && window.pywebview.api) {
+    initialise();
+  } else {
+    window.addEventListener("pywebviewready", initialise, { once: true });
+    // If opened in a normal browser, keep the UI informative rather than failing silently.
+    window.setTimeout(() => {
+      if (!(window.pywebview && window.pywebview.api)) {
+        setConnection(false, "Open this window from the Luma desktop app");
+      }
+    }, 1600);
+  }
+})();

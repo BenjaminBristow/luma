@@ -1,3 +1,6 @@
+cd ~/luma
+
+cat > .github/workflows/release.yml <<'EOF'
 name: Release Luma
 
 on:
@@ -51,26 +54,25 @@ jobs:
           pip install .
           pip install pyinstaller
 
-      - name: Build Luma.app
+      - name: Build versioned Luma.app
+        env:
+          LUMA_VERSION: ${{ github.ref_name }}
         run: |
-          pyinstaller \
-            --clean \
-            --noconfirm \
-            --windowed \
-            --name Luma \
-            --osx-bundle-identifier com.benjaminbristow.luma \
-            --collect-all webview \
-            --add-data "src/luma/app/web:luma/app/web" \
-            src/luma/app/main.py
+          export LUMA_VERSION="${LUMA_VERSION#v}"
+          echo "Building Luma ${LUMA_VERSION}"
+          pyinstaller --clean --noconfirm Luma.spec
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleShortVersionString" \
+            dist/Luma.app/Contents/Info.plist
+          test "$(/usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleShortVersionString' \
+            dist/Luma.app/Contents/Info.plist)" = "$LUMA_VERSION"
 
-      - name: Create DMG staging folder
+      - name: Create DMG installer
         run: |
           mkdir dmg
           cp -R dist/Luma.app dmg/
           ln -s /Applications dmg/Applications
-
-      - name: Build Luma.dmg
-        run: |
           hdiutil create \
             -volname "Luma" \
             -srcfolder dmg \
@@ -78,11 +80,18 @@ jobs:
             -format UDZO \
             Luma.dmg
 
-      - name: Upload DMG
+      - name: Create ZIP download
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/Luma.app Luma-macOS.zip
+
+      - name: Upload release assets
         uses: actions/upload-artifact@v4
         with:
           name: Luma-macOS
-          path: Luma.dmg
+          path: |
+            Luma.dmg
+            Luma-macOS.zip
 
   release:
     name: Create GitHub Release
@@ -90,7 +99,7 @@ jobs:
     needs: build-macos
 
     steps:
-      - name: Download DMG
+      - name: Download release assets
         uses: actions/download-artifact@v4
         with:
           name: Luma-macOS
@@ -98,5 +107,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: Luma.dmg
+          files: |
+            Luma.dmg
+            Luma-macOS.zip
           generate_release_notes: true
