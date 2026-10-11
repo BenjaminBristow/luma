@@ -1,6 +1,3 @@
-cd ~/luma
-
-cat > .github/workflows/release.yml <<'EOF'
 name: Release Luma
 
 on:
@@ -15,7 +12,6 @@ jobs:
   test:
     name: Run tests
     runs-on: ubuntu-latest
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -38,7 +34,6 @@ jobs:
     name: Build macOS application
     runs-on: macos-15
     needs: test
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -61,29 +56,19 @@ jobs:
           export LUMA_VERSION="${LUMA_VERSION#v}"
           echo "Building Luma ${LUMA_VERSION}"
           pyinstaller --clean --noconfirm Luma.spec
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleShortVersionString" \
-            dist/Luma.app/Contents/Info.plist
-          test "$(/usr/libexec/PlistBuddy \
-            -c 'Print :CFBundleShortVersionString' \
-            dist/Luma.app/Contents/Info.plist)" = "$LUMA_VERSION"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" dist/Luma.app/Contents/Info.plist
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' dist/Luma.app/Contents/Info.plist)" = "$LUMA_VERSION"
 
       - name: Create DMG installer
         run: |
           mkdir dmg
           cp -R dist/Luma.app dmg/
           ln -s /Applications dmg/Applications
-          hdiutil create \
-            -volname "Luma" \
-            -srcfolder dmg \
-            -ov \
-            -format UDZO \
-            Luma.dmg
+          hdiutil create -volname "Luma" -srcfolder dmg -ov -format UDZO Luma.dmg
 
       - name: Create ZIP download
         run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            dist/Luma.app Luma-macOS.zip
+          ditto -c -k --sequesterRsrc --keepParent dist/Luma.app Luma-macOS.zip
 
       - name: Upload release assets
         uses: actions/upload-artifact@v4
@@ -97,7 +82,6 @@ jobs:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: build-macos
-
     steps:
       - name: Download release assets
         uses: actions/download-artifact@v4
