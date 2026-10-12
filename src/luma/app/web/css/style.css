@@ -132,7 +132,7 @@ h1 span { color: var(--accent); }
 .after-clip { position: absolute; z-index: 2; inset: 0; clip-path: inset(0 0 0 50%); pointer-events: none; }
 .after-image { z-index: 2; }
 .comparison-range { position: absolute; z-index: 7; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; appearance: none; touch-action: pan-y; }
-.comparison-divider { z-index: 5; position: absolute; top: 0; bottom: 0; left: 50%; width: 0; border-left: 1px solid var(--accent); pointer-events: none; transform: translateX(-.5px); transition: left .06s linear; }
+.comparison-divider { z-index: 5; position: absolute; top: 0; bottom: 0; left: 50%; width: 0; border-left: 1px solid var(--accent); pointer-events: none; transform: translateX(-.5px); transition: none; }
 .divider-knob { position: absolute; top: 50%; left: 0; transform: translate(-50%, -50%); display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: #161a38; border: 4px solid rgba(8,12,24,.86); box-shadow: 0 0 0 1px rgba(158,160,255,.85), 0 5px 22px rgba(0,0,0,.4); }
 .divider-knob svg { width: 18px; height: 18px; stroke-width: 2.4; }
 .comparison-label { z-index: 4; position: absolute; top: 14px; display: flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid rgba(255,255,255,.12); border-radius: 6px; background: rgba(8,12,24,.78); backdrop-filter: blur(8px); color: #e4e8f8; font: 500 8px var(--mono); letter-spacing: .7px; pointer-events: none; }

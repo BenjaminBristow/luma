@@ -241,7 +241,25 @@
     });
 
     const selected = elements.filmstrip.querySelector(".photo-card.is-selected");
-    if (selected) selected.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    if (selected) {
+      const strip = elements.filmstrip;
+      const stripRect = strip.getBoundingClientRect();
+      const cardRect = selected.getBoundingClientRect();
+      const visibleLeft = stripRect.left + strip.clientLeft;
+      const visibleRight = visibleLeft + strip.clientWidth;
+
+      if (cardRect.left < visibleLeft) {
+        strip.scrollTo({
+          left: strip.scrollLeft + cardRect.left - visibleLeft,
+          behavior: "smooth",
+        });
+      } else if (cardRect.right > visibleRight) {
+        strip.scrollTo({
+          left: strip.scrollLeft + cardRect.right - visibleRight,
+          behavior: "smooth",
+        });
+      }
+    }
   }
 
   function setComparisonPosition(value) {
@@ -540,7 +558,28 @@
     elements.carouselPrev.addEventListener("click", () => elements.filmstrip.scrollBy({ left: -330, behavior: "smooth" }));
     elements.carouselNext.addEventListener("click", () => elements.filmstrip.scrollBy({ left: 330, behavior: "smooth" }));
 
-    elements.filmstrip.addEventListener("keydown", (event) => {
+    elements.filmstrip.addEventListener("wheel", (event) => {
+      if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+        event.preventDefault();
+        elements.filmstrip.scrollLeft += event.deltaY;
+      }
+    }, { passive: false });
+
+    document.addEventListener("keydown", (event) => {
+      const target = event.target;
+      const tag = target?.tagName?.toLowerCase();
+      const isInteractive = target?.isContentEditable
+        || ["input", "textarea", "select", "button", "a"].includes(tag);
+
+      if (
+        isInteractive
+        || event.altKey
+        || event.ctrlKey
+        || event.metaKey
+        || event.shiftKey
+        || !state.photos.length
+      ) return;
+
       if (event.key === "ArrowRight") {
         event.preventDefault();
         choosePhoto(Math.min(state.photos.length - 1, state.selectedIndex + 1));
