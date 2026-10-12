@@ -27,3 +27,6 @@ output/*
 # IDE/editor files
 .vscode/
 .idea/
+
+# Windows application packaging
+!LumaWindows.spec

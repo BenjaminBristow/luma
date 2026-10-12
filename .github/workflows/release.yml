@@ -78,20 +78,66 @@ jobs:
             Luma.dmg
             Luma-macOS.zip
 
+  build-windows:
+    name: Build Windows application
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+          pip install pyinstaller
+
+      - name: Build Luma
+        run: pyinstaller --clean --noconfirm LumaWindows.spec
+
+      - name: Package Windows download
+        shell: pwsh
+        run: |
+          if (!(Test-Path "dist/Luma/Luma.exe")) {
+            throw "Build failed: dist/Luma/Luma.exe was not found."
+          }
+          Compress-Archive -Path "dist/Luma" -DestinationPath "Luma-Windows.zip" -Force
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: Luma-Windows
+          path: Luma-Windows.zip
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: build-macos
+    needs:
+      - build-macos
+      - build-windows
     steps:
-      - name: Download release assets
+      - name: Download macOS assets
         uses: actions/download-artifact@v4
         with:
           name: Luma-macOS
+          path: release-assets
 
-      - name: Create release
+      - name: Download Windows assets
+        uses: actions/download-artifact@v4
+        with:
+          name: Luma-Windows
+          path: release-assets
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            Luma.dmg
-            Luma-macOS.zip
+            release-assets/Luma.dmg
+            release-assets/Luma-macOS.zip
+            release-assets/Luma-Windows.zip
           generate_release_notes: true
